@@ -261,7 +261,16 @@ public sealed class ChatServerService : IAsyncDisposable
             _logger.LogDebug("收到 [{Id}]: {Content}", conn.Id, msg.RawContent);
 
             // 路由消息
-            var result = _router.Route(msg.ConnectionId, msg.RawContent);
+            RouteResult result;
+            try
+            {
+                result = _router.Route(msg.ConnectionId, msg.RawContent);
+            }
+            catch (ProtocolException ex)
+            {
+                _logger.LogWarning("业务协议错误: {Message}", ex.Message);
+                return false; // 通知调用方断开此连接
+            }
             await ExecuteActionsAsync(result);
         }
 
