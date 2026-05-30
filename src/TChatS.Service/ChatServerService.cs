@@ -292,13 +292,11 @@ public sealed class ChatServerService : IAsyncDisposable
             {
                 case OutgoingAction.Send send:
                     await SendToConnectionAsync(send.ConnectionId, send.Content);
-                    await Task.Delay(100);
                     break;
 
                 case OutgoingAction.BroadcastToChat broadcast:
                     await BroadcastToChatAsync(
                         broadcast.ChatId, broadcast.Content, broadcast.ExcludeConnectionId);
-                    await Task.Delay(100);
                     break;
 
                 case OutgoingAction.Disconnect disconnect:

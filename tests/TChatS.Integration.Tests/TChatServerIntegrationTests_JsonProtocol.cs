@@ -1,5 +1,7 @@
+using System.Buffers.Binary;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using TChatS.Protocol;
@@ -9,31 +11,30 @@ using Xunit;
 namespace TChatS.Integration.Tests;
 
 /// <summary>
-/// 集成测试 — 启动真实 TCP 服务端，用多个客户端模拟完整消息流程。
-/// 使用 TcpTextProtocol (以 <c>\n</c> 为分帧分隔符) 简化测试收发。
+/// 集成测试 — 使用 TcpJsonProtocol (长度前缀分帧 + JSON 业务协议)。
 /// </summary>
-public class TChatServerIntegrationTests : IAsyncDisposable
+public class TChatServerIntegrationTests_JsonProtocol : IAsyncDisposable
 {
     private readonly int _port;
     private readonly ChatServerService _server;
     private readonly CancellationTokenSource _cts = new();
 
-    public TChatServerIntegrationTests()
+    public TChatServerIntegrationTests_JsonProtocol()
     {
         _port = GetRandomPort();
 
         var services = new ServiceCollection();
         services.AddLogging(b => b.SetMinimumLevel(LogLevel.Warning));
 
-        // 注册现代协议 (以 \n 分帧) 替代默认的旧版协议
-        services.AddSingleton<IProtocolParser>(new TcpTextProtocol());
+        // JSON 协议栈
+        services.AddSingleton<IProtocolParser>(new TcpJsonProtocol());
+        services.AddSingleton<IServiceProtocol, JsonServiceProtocol>();
 
         services.AddSingleton<TChatS.Storage.IUserRepository, TChatS.Storage.InMemoryUserRepository>();
         services.AddSingleton<TChatS.Core.AuthService>();
         services.AddSingleton<TChatS.Core.ChatRoomManager>();
         services.AddSingleton<TChatS.Core.MessageRouter>();
         services.AddSingleton<TChatS.Transport.ConnectionManager>();
-        services.AddSingleton<TChatS.Protocol.IServiceProtocol, TextServiceProtocol>();
         services.AddSingleton(new ChatServerOptions
         {
             BindAddress = "127.0.0.1",
@@ -64,23 +65,32 @@ public class TChatServerIntegrationTests : IAsyncDisposable
         return c;
     }
 
-    /// <summary>以 UTF-8 发送一条消息，附加 \n 分隔符。</summary>
-    private static async Task SendAsync(TcpClient c, string msg)
+    /// <summary>发送一条 JSON 消息，带 4 字节大端长度前缀。</summary>
+    private static async Task SendJsonAsync(TcpClient c, string json)
     {
-        var data = Encoding.UTF8.GetBytes(msg + "\n");
-        await c.GetStream().WriteAsync(data);
+        var payload = Encoding.UTF8.GetBytes(json);
+        var frame = new byte[4 + payload.Length];
+        BinaryPrimitives.WriteInt32BigEndian(frame.AsSpan(0, 4), payload.Length);
+        payload.CopyTo(frame.AsSpan(4));
+        await c.GetStream().WriteAsync(frame);
     }
 
-    /// <summary>接收多条以 \n 分隔的消息（粘包安全）。</summary>
+    /// <summary>快速构造并发送一条 JSON 消息。</summary>
+    private static Task SendAsync(TcpClient c, string type, object args)
+    {
+        var json = JsonSerializer.Serialize(new { type, args });
+        return SendJsonAsync(c, json);
+    }
+
+    /// <summary>接收多条长度前缀分帧的 JSON 消息。</summary>
     private static async Task<List<string>> ReceiveAllAsync(
         TcpClient c, int maxCount = 10, int idleTimeoutMs = 3000)
     {
         var msgs = new List<string>();
-        var leftover = new List<byte>(); // 跨次调用的遗留字节
+        var leftover = new List<byte>();
         var buf = new byte[4096];
         var stream = c.GetStream();
 
-        // 第一轮读取用较长超时
         int perReadTimeout = idleTimeoutMs;
 
         while (msgs.Count < maxCount)
@@ -93,27 +103,59 @@ public class TChatServerIntegrationTests : IAsyncDisposable
             }
             catch (OperationCanceledException)
             {
-                break; // 超时，没有更多数据
+                break;
             }
 
-            if (n == 0) break; // 远端关闭
+            if (n == 0) break;
 
             leftover.AddRange(buf.AsSpan(0, n));
 
-            // 分割所有完整的行
+            // 尝试解析完整的长度前缀帧
             while (true)
             {
-                var idx = leftover.IndexOf((byte)'\n');
-                if (idx < 0) break;
-                msgs.Add(Encoding.UTF8.GetString(leftover.Take(idx).ToArray()));
-                leftover.RemoveRange(0, idx + 1);
+                if (leftover.Count < 4)
+                    break;
+
+                var payloadLen = BinaryPrimitives.ReadInt32BigEndian(
+                    leftover.ToArray().AsSpan(0, 4));
+
+                if (payloadLen < 0 || payloadLen > 65536)
+                    break; // 非法长度，等更多数据
+
+                var frameLen = 4 + payloadLen;
+                if (leftover.Count < frameLen)
+                    break;
+
+                msgs.Add(Encoding.UTF8.GetString(
+                    leftover.GetRange(4, payloadLen).ToArray()));
+                leftover.RemoveRange(0, frameLen);
+
                 if (msgs.Count >= maxCount) return msgs;
             }
-            // 后续读取用较短超时（数据已在路上）
+
             perReadTimeout = 200;
         }
 
         return msgs;
+    }
+
+    /// <summary>检查 JSON 消息是否匹配给定的 type 和 args 谓词。</summary>
+    private static bool IsMsg(string json, string type, Func<JsonElement, bool>? argsPredicate = null)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.GetProperty("type").GetString() != type)
+                return false;
+            if (argsPredicate != null && !argsPredicate(root.GetProperty("args")))
+                return false;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static int GetRandomPort()
@@ -136,11 +178,12 @@ public class TChatServerIntegrationTests : IAsyncDisposable
         await Task.Delay(100);
 
         using var c = await ConnectAsync(_port);
-        await SendAsync(c, "#2Ui1n+-#Alice@1234>Room1");
+        await SendAsync(c, "login", new { userName = "Alice", password = "1234", chatId = "Room1" });
         var msgs = await ReceiveAllAsync(c);
 
-        Assert.Contains("#->2", msgs);
-        Assert.Contains(msgs, m => m.Contains("欢迎加入群聊"));
+        Assert.Contains(msgs, m => IsMsg(m, "newUser"));
+        Assert.Contains(msgs, m => IsMsg(m, "serverMessage",
+            a => a.GetProperty("content").GetString()!.Contains("欢迎加入群聊")));
     }
 
     [Fact]
@@ -150,15 +193,15 @@ public class TChatServerIntegrationTests : IAsyncDisposable
         await Task.Delay(100);
 
         using var a = await ConnectAsync(_port);
-        await SendAsync(a, "#2Ui1n+-#Alice@1>Room1");
-        await ReceiveAllAsync(a); // 消费 Alice 的欢迎消息
+        await SendAsync(a, "login", new { userName = "Alice", password = "1", chatId = "Room1" });
+        await ReceiveAllAsync(a);
 
         using var b = await ConnectAsync(_port);
-        await SendAsync(b, "#2Ui1n+-#Bob@1>Room1");
+        await SendAsync(b, "login", new { userName = "Bob", password = "1", chatId = "Room1" });
         var bMsgs = await ReceiveAllAsync(b);
 
-        // Bob 应收到 #->5 包含 Alice
-        Assert.Contains(bMsgs, m => m.StartsWith("#->5") && m.Contains("Alice"));
+        Assert.Contains(bMsgs, m => IsMsg(m, "userList",
+            a => a.GetProperty("users").EnumerateArray().Any(u => u.GetString() == "Alice")));
     }
 
     [Fact]
@@ -168,52 +211,53 @@ public class TChatServerIntegrationTests : IAsyncDisposable
         await Task.Delay(100);
 
         using var a = await ConnectAsync(_port);
-        await SendAsync(a, "#2Ui1n+-#Alice@1>X");
+        await SendAsync(a, "login", new { userName = "Alice", password = "1", chatId = "X" });
         await ReceiveAllAsync(a);
 
         using var b = await ConnectAsync(_port);
-        await SendAsync(b, "#2Ui1n+-#Bob@1>X");
+        await SendAsync(b, "login", new { userName = "Bob", password = "1", chatId = "X" });
 
-        // Alice 应收到 #->6Bob (Bob 加入)
         var aMsgs = await ReceiveAllAsync(a);
-        Assert.Contains("#->6Bob", aMsgs);
+        Assert.Contains(aMsgs, m => IsMsg(m, "userJoin",
+            a => a.GetProperty("userName").GetString() == "Bob"));
     }
 
     [Fact]
-    public async Task ExistingUser_Relogin_Sends0()
+    public async Task ExistingUser_Relogin_SendsRelogin()
     {
         await StartServerAsync();
         await Task.Delay(100);
 
         using var c1 = await ConnectAsync(_port);
-        await SendAsync(c1, "#2Ui1n+-#Tester@secret>Room1");
+        await SendAsync(c1, "login", new { userName = "Tester", password = "secret", chatId = "Room1" });
         await ReceiveAllAsync(c1);
         c1.Close();
 
         using var c2 = await ConnectAsync(_port);
-        await SendAsync(c2, "#2Ui1n+-#Tester@secret>Room1");
+        await SendAsync(c2, "login", new { userName = "Tester", password = "secret", chatId = "Room1" });
         var msgs = await ReceiveAllAsync(c2);
 
-        Assert.Contains("#->0", msgs);
-        Assert.Contains(msgs, m => m.Contains("欢迎回来"));
+        Assert.Contains(msgs, m => IsMsg(m, "relogin"));
+        Assert.Contains(msgs, m => IsMsg(m, "serverMessage",
+            a => a.GetProperty("content").GetString()!.Contains("欢迎回来")));
     }
 
     [Fact]
-    public async Task WrongPassword_RejectedWith1()
+    public async Task WrongPassword_RejectedWithWrongPassword()
     {
         await StartServerAsync();
         await Task.Delay(100);
 
         using var c1 = await ConnectAsync(_port);
-        await SendAsync(c1, "#2Ui1n+-#Eve@correct>Room1");
+        await SendAsync(c1, "login", new { userName = "Eve", password = "correct", chatId = "Room1" });
         await ReceiveAllAsync(c1);
         c1.Close();
 
         using var c2 = await ConnectAsync(_port);
-        await SendAsync(c2, "#2Ui1n+-#Eve@WRONG>Room1");
+        await SendAsync(c2, "login", new { userName = "Eve", password = "WRONG", chatId = "Room1" });
         var msgs = await ReceiveAllAsync(c2);
 
-        Assert.Contains("#->1", msgs);
+        Assert.Contains(msgs, m => IsMsg(m, "wrongPassword"));
     }
 
     [Fact]
@@ -225,15 +269,17 @@ public class TChatServerIntegrationTests : IAsyncDisposable
         using var alice = await ConnectAsync(_port);
         using var bob = await ConnectAsync(_port);
 
-        await SendAsync(alice, "#2Ui1n+-#Alice@1>Lobby");
+        await SendAsync(alice, "login", new { userName = "Alice", password = "1", chatId = "Lobby" });
         await ReceiveAllAsync(alice);
-        await SendAsync(bob, "#2Ui1n+-#Bob@1>Lobby");
+        await SendAsync(bob, "login", new { userName = "Bob", password = "1", chatId = "Lobby" });
         await ReceiveAllAsync(bob);
 
-        await SendAsync(alice, "Hello everyone!");
+        await SendAsync(alice, "normal", new { content = "Hello everyone!" });
         var bobMsgs = await ReceiveAllAsync(bob);
 
-        Assert.Contains(bobMsgs, m => m == "<Alice>: Hello everyone!");
+        Assert.Contains(bobMsgs, m => IsMsg(m, "chat",
+            a => a.GetProperty("userName").GetString() == "Alice"
+              && a.GetProperty("content").GetString() == "Hello everyone!"));
     }
 
     [Fact]
@@ -245,16 +291,17 @@ public class TChatServerIntegrationTests : IAsyncDisposable
         using var alice = await ConnectAsync(_port);
         using var bob = await ConnectAsync(_port);
 
-        await SendAsync(alice, "#2Ui1n+-#Alice@1>Room1");
+        await SendAsync(alice, "login", new { userName = "Alice", password = "1", chatId = "Room1" });
         await ReceiveAllAsync(alice);
-        await SendAsync(bob, "#2Ui1n+-#Bob@1>Room1");
+        await SendAsync(bob, "login", new { userName = "Bob", password = "1", chatId = "Room1" });
         await ReceiveAllAsync(bob);
 
-        await SendAsync(alice, "#->7Bob#->Secret!");
+        await SendAsync(alice, "private", new { target = "Bob", content = "Secret!" });
         var bobMsgs = await ReceiveAllAsync(bob);
 
-        Assert.Contains(bobMsgs, m => m.Contains("Private Message From<Alice>"));
-        Assert.Contains(bobMsgs, m => m.Contains("Secret!"));
+        Assert.Contains(bobMsgs, m => IsMsg(m, "dispatchPrivate",
+            a => a.GetProperty("userName").GetString() == "Alice"
+              && a.GetProperty("content").GetString() == "Secret!"));
     }
 
     [Fact]
@@ -264,13 +311,14 @@ public class TChatServerIntegrationTests : IAsyncDisposable
         await Task.Delay(100);
 
         using var alice = await ConnectAsync(_port);
-        await SendAsync(alice, "#2Ui1n+-#Alice@1>Room1");
+        await SendAsync(alice, "login", new { userName = "Alice", password = "1", chatId = "Room1" });
         await ReceiveAllAsync(alice);
 
-        await SendAsync(alice, "#->7Nobody#->Hello?");
+        await SendAsync(alice, "private", new { target = "Nobody", content = "Hello?" });
         var msgs = await ReceiveAllAsync(alice);
 
-        Assert.Contains("#->8Nobody", msgs);
+        Assert.Contains(msgs, m => IsMsg(m, "userLeave",
+            a => a.GetProperty("userName").GetString() == "Nobody"));
     }
 
     [Fact]
@@ -282,17 +330,18 @@ public class TChatServerIntegrationTests : IAsyncDisposable
         using var alice = await ConnectAsync(_port);
         using var bob = await ConnectAsync(_port);
 
-        await SendAsync(alice, "#2Ui1n+-#Alice@1>Room1");
+        await SendAsync(alice, "login", new { userName = "Alice", password = "1", chatId = "Room1" });
         await ReceiveAllAsync(alice);
-        await SendAsync(bob, "#2Ui1n+-#Bob@1>Room1");
+        await SendAsync(bob, "login", new { userName = "Bob", password = "1", chatId = "Room1" });
         await ReceiveAllAsync(bob);
-        await ReceiveAllAsync(alice); // 消费 Alice 收到的 #->6Bob
+        await ReceiveAllAsync(alice); // 消费 Alice 收到的 userJoin
 
         bob.Close();
         await Task.Delay(200);
 
         var aliceMsgs = await ReceiveAllAsync(alice);
-        Assert.Contains("#->8Bob", aliceMsgs);
+        Assert.Contains(aliceMsgs, m => IsMsg(m, "userLeave",
+            a => a.GetProperty("userName").GetString() == "Bob"));
     }
 
     [Fact]
@@ -304,15 +353,16 @@ public class TChatServerIntegrationTests : IAsyncDisposable
         using var a = await ConnectAsync(_port);
         using var b = await ConnectAsync(_port);
 
-        await SendAsync(a, "#2Ui1n+-#A@1>RoomA");
+        await SendAsync(a, "login", new { userName = "A", password = "1", chatId = "RoomA" });
         await ReceiveAllAsync(a);
-        await SendAsync(b, "#2Ui1n+-#B@1>RoomB");
+        await SendAsync(b, "login", new { userName = "B", password = "1", chatId = "RoomB" });
         await ReceiveAllAsync(b);
 
-        await SendAsync(a, "Only RoomA");
+        await SendAsync(a, "normal", new { content = "Only RoomA" });
         var bMsgs = await ReceiveAllAsync(b, idleTimeoutMs: 1000);
 
-        Assert.DoesNotContain(bMsgs, m => m.Contains("Only RoomA"));
+        Assert.DoesNotContain(bMsgs, m => IsMsg(m, "chat",
+            a => a.GetProperty("content").GetString()!.Contains("Only RoomA")));
     }
 
     [Fact]
@@ -322,14 +372,14 @@ public class TChatServerIntegrationTests : IAsyncDisposable
         await Task.Delay(100);
 
         using var c1 = await ConnectAsync(_port);
-        await SendAsync(c1, "#2Ui1n+-#Alice@1>Room1");
+        await SendAsync(c1, "login", new { userName = "Alice", password = "1", chatId = "Room1" });
         await ReceiveAllAsync(c1);
         c1.Close();
 
         using var c2 = await ConnectAsync(_port);
-        await SendAsync(c2, "#2Ui1n+-#alice@1>Room1");
+        await SendAsync(c2, "login", new { userName = "alice", password = "1", chatId = "Room1" });
         var msgs = await ReceiveAllAsync(c2);
 
-        Assert.Contains("#->0", msgs); // 重新登录，不是新用户
+        Assert.Contains(msgs, m => IsMsg(m, "relogin"));
     }
 }

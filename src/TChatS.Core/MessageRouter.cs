@@ -122,13 +122,13 @@ public class MessageRouter
 
     // ─── 普通群聊 ───
 
-    private static RouteResult HandleNormalChat(
+    private RouteResult HandleNormalChat(
         long connectionId, string userName, ChatRoom chatRoom, string content)
     {
         var actions = new List<OutgoingAction>
         {
             new OutgoingAction.BroadcastToChat(
-                chatRoom.ChatId, $"<{userName}>: {content}",
+                chatRoom.ChatId, _protocol.ClientNormalMessage(userName, content),
                 ExcludeConnectionId: connectionId)
         };
         return new RouteResult(actions);

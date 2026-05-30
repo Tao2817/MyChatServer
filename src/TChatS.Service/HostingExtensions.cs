@@ -60,11 +60,15 @@ public static class HostingExtensions
         services.AddSingleton<ConnectionManager>();
 
         // 协议层 — 根据配置选择协议实现
-        services.AddSingleton<IServiceProtocol, TextServiceProtocol>();
+        services.AddSingleton<IServiceProtocol>(sp =>
+        {
+            var options = sp.GetRequiredService<ChatServerOptions>();
+            return ResolveServiceProtocol(options);
+        });
         services.AddSingleton<IProtocolParser>(sp =>
         {
             var options = sp.GetRequiredService<ChatServerOptions>();
-            return ResolveProtocol(options);
+            return ResolveTransport(options);
         });
 
         // 服务编排
@@ -72,18 +76,33 @@ public static class HostingExtensions
     }
 
     /// <summary>
-    /// 根据 <see cref="ChatServerOptions.Protocol"/> 字段选择协议实现。
+    /// 根据 <see cref="ChatServerOptions.Protocol"/> 字段选择传输层实现。
     /// </summary>
-    private static IProtocolParser ResolveProtocol(ChatServerOptions options)
+    private static IProtocolParser ResolveTransport(ChatServerOptions options)
     {
         var protocol = options.Protocol?.Trim();
 
         if (string.Equals(protocol, "Modern", StringComparison.OrdinalIgnoreCase))
-        {
             return new TcpTextProtocol();
-        }
+
+        if (string.Equals(protocol, "Json", StringComparison.OrdinalIgnoreCase))
+            return new TcpJsonProtocol();
 
         // 默认 Legacy
         return new TcpTextProtocolLegacy();
+    }
+
+    /// <summary>
+    /// 根据 <see cref="ChatServerOptions.Protocol"/> 字段选择业务协议实现。
+    /// </summary>
+    private static IServiceProtocol ResolveServiceProtocol(ChatServerOptions options)
+    {
+        var protocol = options.Protocol?.Trim();
+
+        if (string.Equals(protocol, "Json", StringComparison.OrdinalIgnoreCase))
+            return new JsonServiceProtocol();
+
+        // Legacy / Modern 均使用文本协议
+        return new TextServiceProtocol();
     }
 }
