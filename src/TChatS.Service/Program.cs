@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Serilog;
 using TChatS.Service;
 
 // ─── 加载配置 ───
@@ -9,25 +10,43 @@ var configuration = new ConfigurationBuilder()
     .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
     .Build();
 
+// ─── 日志持久化 ───
+var logDir = configuration.GetValue("LogDirectory", "logs");
+var logPath = Path.Combine(logDir, "tchats-.log");
+var clearLogs = configuration.GetValue("ClearLogsOnStartup", false);
+
+if (clearLogs && Directory.Exists(logDir))
+{
+    foreach (var f in Directory.GetFiles(logDir, "tchats-*.log"))
+        File.Delete(f);
+}
+
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Information()
+    .MinimumLevel.Override("Microsoft", Serilog.Events.LogEventLevel.Warning)
+    .Enrich.With<StackTraceEnricher>()
+    .WriteTo.Console(
+        outputTemplate: "{Timestamp:HH:mm:ss} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
+    .WriteTo.File(
+        path: logPath,
+        rollingInterval: RollingInterval.Day,
+        retainedFileCountLimit: 30,
+        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {Message:lj}{NewLine}{Exception}{StackTrace}")
+    .CreateLogger();
+
 // ─── DI 容器 ───
 var services = new ServiceCollection();
 
 services.AddLogging(builder =>
 {
-    builder.AddConfiguration(configuration.GetSection("Logging"));
-    builder.AddSimpleConsole(options =>
-    {
-        options.SingleLine = true;
-        options.TimestampFormat = "HH:mm:ss ";
-    });
+    builder.ClearProviders();
+    builder.AddSerilog(dispose: true);
 });
 
 services.AddTChatServer(configuration);
 
 var provider = services.BuildServiceProvider();
-var loggerFactory = provider.GetRequiredService<ILoggerFactory>();
-var logger = loggerFactory.CreateLogger("TChatServer");
-
+var logger = provider.GetRequiredService<ILogger<ChatServerService>>();
 var serverOptions = provider.GetRequiredService<ChatServerOptions>();
 
 // ─── 优雅关闭 ───
@@ -47,6 +66,7 @@ try
     await server.StartAsync(cts.Token);
     logger.LogInformation("TChatServer 已启动在 {Address}:{Port}",
         serverOptions.BindAddress, serverOptions.Port);
+    logger.LogInformation("日志目录: {LogDir}", Path.GetFullPath(logDir));
     logger.LogInformation("按 Ctrl+C 停止服务");
 
     try
@@ -64,4 +84,5 @@ finally
 {
     await server.DisposeAsync();
     logger.LogInformation("服务已完全关闭");
+    await Log.CloseAndFlushAsync();
 }
