@@ -12,11 +12,11 @@ public class TcpTextProtocolLegacyTests
     public void TryParse_CompleteMessage_ReturnsEntireBuffer()
     {
         // 模拟客户端发送的登录消息 (UTF-16 LE 宽字节)
-        var buffer = CreateBuffer("2Ui1n+-#Tao2817@1234>Room1");
+        var buffer = CreateBuffer("#2Ui1n+-#Tao2817@1234>Room1");
         var result = _protocol.TryParse(ref buffer);
 
         Assert.NotNull(result);
-        Assert.Equal("2Ui1n+-#Tao2817@1234>Room1", result.Value.RawContent);
+        Assert.Equal("#2Ui1n+-#Tao2817@1234>Room1", result.Value.RawContent);
         Assert.Equal(0, buffer.Length); // 全部消费
     }
 
@@ -139,7 +139,7 @@ public class TcpTextProtocolLegacyTests
     [Fact]
     public void RoundTrip_LoginMessage_PreservesContent()
     {
-        var original = "2Ui1n+-#User@Pass>Room1";
+        var original = "#2Ui1n+-#User@Pass>Room1";
         var msg = new ProtocolMessage(original, ConnectionId: 0);
 
         // 客户端和服务端统一使用 UTF-16 LE

@@ -136,7 +136,7 @@ public class TChatServerIntegrationTests : IAsyncDisposable
         await Task.Delay(100);
 
         using var c = await ConnectAsync(_port);
-        await SendAsync(c, "2Ui1n+-#Alice@1234>Room1");
+        await SendAsync(c, "#2Ui1n+-#Alice@1234>Room1");
         var msgs = await ReceiveAllAsync(c);
 
         Assert.Contains("#->2", msgs);
@@ -150,11 +150,11 @@ public class TChatServerIntegrationTests : IAsyncDisposable
         await Task.Delay(100);
 
         using var a = await ConnectAsync(_port);
-        await SendAsync(a, "2Ui1n+-#Alice@1>Room1");
+        await SendAsync(a, "#2Ui1n+-#Alice@1>Room1");
         await ReceiveAllAsync(a); // 消费 Alice 的欢迎消息
 
         using var b = await ConnectAsync(_port);
-        await SendAsync(b, "2Ui1n+-#Bob@1>Room1");
+        await SendAsync(b, "#2Ui1n+-#Bob@1>Room1");
         var bMsgs = await ReceiveAllAsync(b);
 
         // Bob 应收到 #->5 包含 Alice
@@ -168,11 +168,11 @@ public class TChatServerIntegrationTests : IAsyncDisposable
         await Task.Delay(100);
 
         using var a = await ConnectAsync(_port);
-        await SendAsync(a, "2Ui1n+-#Alice@1>X");
+        await SendAsync(a, "#2Ui1n+-#Alice@1>X");
         await ReceiveAllAsync(a);
 
         using var b = await ConnectAsync(_port);
-        await SendAsync(b, "2Ui1n+-#Bob@1>X");
+        await SendAsync(b, "#2Ui1n+-#Bob@1>X");
 
         // Alice 应收到 #->6Bob (Bob 加入)
         var aMsgs = await ReceiveAllAsync(a);
@@ -186,12 +186,12 @@ public class TChatServerIntegrationTests : IAsyncDisposable
         await Task.Delay(100);
 
         using var c1 = await ConnectAsync(_port);
-        await SendAsync(c1, "2Ui1n+-#Tester@secret>Room1");
+        await SendAsync(c1, "#2Ui1n+-#Tester@secret>Room1");
         await ReceiveAllAsync(c1);
         c1.Close();
 
         using var c2 = await ConnectAsync(_port);
-        await SendAsync(c2, "2Ui1n+-#Tester@secret>Room1");
+        await SendAsync(c2, "#2Ui1n+-#Tester@secret>Room1");
         var msgs = await ReceiveAllAsync(c2);
 
         Assert.Contains("#->0", msgs);
@@ -205,12 +205,12 @@ public class TChatServerIntegrationTests : IAsyncDisposable
         await Task.Delay(100);
 
         using var c1 = await ConnectAsync(_port);
-        await SendAsync(c1, "2Ui1n+-#Eve@correct>Room1");
+        await SendAsync(c1, "#2Ui1n+-#Eve@correct>Room1");
         await ReceiveAllAsync(c1);
         c1.Close();
 
         using var c2 = await ConnectAsync(_port);
-        await SendAsync(c2, "2Ui1n+-#Eve@WRONG>Room1");
+        await SendAsync(c2, "#2Ui1n+-#Eve@WRONG>Room1");
         var msgs = await ReceiveAllAsync(c2);
 
         Assert.Contains("#->1", msgs);
@@ -225,9 +225,9 @@ public class TChatServerIntegrationTests : IAsyncDisposable
         using var alice = await ConnectAsync(_port);
         using var bob = await ConnectAsync(_port);
 
-        await SendAsync(alice, "2Ui1n+-#Alice@1>Lobby");
+        await SendAsync(alice, "#2Ui1n+-#Alice@1>Lobby");
         await ReceiveAllAsync(alice);
-        await SendAsync(bob, "2Ui1n+-#Bob@1>Lobby");
+        await SendAsync(bob, "#2Ui1n+-#Bob@1>Lobby");
         await ReceiveAllAsync(bob);
 
         await SendAsync(alice, "Hello everyone!");
@@ -245,9 +245,9 @@ public class TChatServerIntegrationTests : IAsyncDisposable
         using var alice = await ConnectAsync(_port);
         using var bob = await ConnectAsync(_port);
 
-        await SendAsync(alice, "2Ui1n+-#Alice@1>Room1");
+        await SendAsync(alice, "#2Ui1n+-#Alice@1>Room1");
         await ReceiveAllAsync(alice);
-        await SendAsync(bob, "2Ui1n+-#Bob@1>Room1");
+        await SendAsync(bob, "#2Ui1n+-#Bob@1>Room1");
         await ReceiveAllAsync(bob);
 
         await SendAsync(alice, "#->7Bob#->Secret!");
@@ -264,7 +264,7 @@ public class TChatServerIntegrationTests : IAsyncDisposable
         await Task.Delay(100);
 
         using var alice = await ConnectAsync(_port);
-        await SendAsync(alice, "2Ui1n+-#Alice@1>Room1");
+        await SendAsync(alice, "#2Ui1n+-#Alice@1>Room1");
         await ReceiveAllAsync(alice);
 
         await SendAsync(alice, "#->7Nobody#->Hello?");
@@ -282,9 +282,9 @@ public class TChatServerIntegrationTests : IAsyncDisposable
         using var alice = await ConnectAsync(_port);
         using var bob = await ConnectAsync(_port);
 
-        await SendAsync(alice, "2Ui1n+-#Alice@1>Room1");
+        await SendAsync(alice, "#2Ui1n+-#Alice@1>Room1");
         await ReceiveAllAsync(alice);
-        await SendAsync(bob, "2Ui1n+-#Bob@1>Room1");
+        await SendAsync(bob, "#2Ui1n+-#Bob@1>Room1");
         await ReceiveAllAsync(bob);
         await ReceiveAllAsync(alice); // 消费 Alice 收到的 #->6Bob
 
@@ -304,9 +304,9 @@ public class TChatServerIntegrationTests : IAsyncDisposable
         using var a = await ConnectAsync(_port);
         using var b = await ConnectAsync(_port);
 
-        await SendAsync(a, "2Ui1n+-#A@1>RoomA");
+        await SendAsync(a, "#2Ui1n+-#A@1>RoomA");
         await ReceiveAllAsync(a);
-        await SendAsync(b, "2Ui1n+-#B@1>RoomB");
+        await SendAsync(b, "#2Ui1n+-#B@1>RoomB");
         await ReceiveAllAsync(b);
 
         await SendAsync(a, "Only RoomA");
@@ -322,12 +322,12 @@ public class TChatServerIntegrationTests : IAsyncDisposable
         await Task.Delay(100);
 
         using var c1 = await ConnectAsync(_port);
-        await SendAsync(c1, "2Ui1n+-#Alice@1>Room1");
+        await SendAsync(c1, "#2Ui1n+-#Alice@1>Room1");
         await ReceiveAllAsync(c1);
         c1.Close();
 
         using var c2 = await ConnectAsync(_port);
-        await SendAsync(c2, "2Ui1n+-#alice@1>Room1");
+        await SendAsync(c2, "#2Ui1n+-#alice@1>Room1");
         var msgs = await ReceiveAllAsync(c2);
 
         Assert.Contains("#->0", msgs); // 重新登录，不是新用户

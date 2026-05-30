@@ -41,8 +41,12 @@ public static class ProtocolFormat
     /// <summary>协议指令前缀</summary>
     public const string Prefix = "#->";
 
-    /// <summary>登录魔术字</summary>
-    public const string LoginMagic = "2Ui1n+-#";
+    /// <summary>
+    /// 登录魔术字，共 9 字符。旧版客户端格式: <c>#2Ui1n+-#User@Pass&gt;ChatID</c>
+    /// 出处: TChatClientDlg.cpp:258 <c>INFO.Format(L"#2Ui1n+-#%s@%s&gt;%s", ...)</c>
+    /// 服务端通过 <c>message.Delete(0, 9)</c> 剥除此前缀。
+    /// </summary>
+    public const string LoginMagic = "#2Ui1n+-#";
 
     /// <summary>私聊指令前缀</summary>
     public const string PrivatePrefix = "#->7";

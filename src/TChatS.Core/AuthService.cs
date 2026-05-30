@@ -43,7 +43,7 @@ public class AuthService
 
     /// <summary>
     /// 从原始消息中解析登录信息。
-    /// 格式: <c>2Ui1n+-#UserName@Password&gt;ChatID</c>
+    /// 格式: <c>#2Ui1n+-#UserName@Password&gt;ChatID</c>
     /// </summary>
     /// <param name="rawMessage">原始消息字符串</param>
     /// <returns>解析出的 <see cref="LoginInfo"/>，格式不正确返回 null</returns>

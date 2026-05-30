@@ -24,7 +24,7 @@ public class MessageRouterTests
     [Fact]
     public void Login_NewUser_SendsNewUserAndWelcome()
     {
-        var result = _router.Route(connectionId: 1, "2Ui1n+-#Tao@1234>Room1");
+        var result = _router.Route(connectionId: 1, "#2Ui1n+-#Tao@1234>Room1");
 
         Assert.Contains(result.Actions,
             a => a is OutgoingAction.Send s && s.Content == "#->2");
@@ -38,12 +38,12 @@ public class MessageRouterTests
     public void Login_ExistingUserCorrectPassword_SendsReloginSuccess()
     {
         // 先注册
-        _router.Route(connectionId: 1, "2Ui1n+-#Bob@pwd>Room1");
+        _router.Route(connectionId: 1, "#2Ui1n+-#Bob@pwd>Room1");
         // 断开
         _router.HandleDisconnect(1);
 
         // 重新登录（新连接 ID）
-        var result = _router.Route(connectionId: 2, "2Ui1n+-#Bob@pwd>Room1");
+        var result = _router.Route(connectionId: 2, "#2Ui1n+-#Bob@pwd>Room1");
 
         Assert.Contains(result.Actions,
             a => a is OutgoingAction.Send s && s.Content == "#->0");
@@ -54,9 +54,9 @@ public class MessageRouterTests
     [Fact]
     public void Login_WrongPassword_SendsErrorAndDisconnects()
     {
-        _router.Route(connectionId: 1, "2Ui1n+-#Eve@correct>Room1");
+        _router.Route(connectionId: 1, "#2Ui1n+-#Eve@correct>Room1");
 
-        var result = _router.Route(connectionId: 2, "2Ui1n+-#Eve@wrong>Room1");
+        var result = _router.Route(connectionId: 2, "#2Ui1n+-#Eve@wrong>Room1");
 
         Assert.Contains(result.Actions,
             a => a is OutgoingAction.Send s && s.Content == "#->1");
@@ -78,7 +78,7 @@ public class MessageRouterTests
     [Fact]
     public void Login_BannedUserName_SendsErrorAndDisconnects()
     {
-        var result = _router.Route(connectionId: 1, "2Ui1n+-#server@pwd>Room1");
+        var result = _router.Route(connectionId: 1, "#2Ui1n+-#server@pwd>Room1");
 
         Assert.Contains(result.Actions,
             a => a is OutgoingAction.Send s && s.Content.Contains("禁止"));
@@ -90,11 +90,11 @@ public class MessageRouterTests
     public void Login_SendsUserListToNewJoiner()
     {
         // 先加入两个用户到同一聊天室
-        _router.Route(connectionId: 1, "2Ui1n+-#Alice@1>Lobby");
-        _router.Route(connectionId: 2, "2Ui1n+-#Bob@1>Lobby");
+        _router.Route(connectionId: 1, "#2Ui1n+-#Alice@1>Lobby");
+        _router.Route(connectionId: 2, "#2Ui1n+-#Bob@1>Lobby");
 
         // 第三个用户加入
-        var result = _router.Route(connectionId: 3, "2Ui1n+-#Charlie@1>Lobby");
+        var result = _router.Route(connectionId: 3, "#2Ui1n+-#Charlie@1>Lobby");
 
         // 应包含 #->5 用户列表（Alice 和 Bob）
         var userListAction = result.Actions
@@ -108,9 +108,9 @@ public class MessageRouterTests
     [Fact]
     public void Login_BroadcastsJoinToOthers()
     {
-        _router.Route(connectionId: 1, "2Ui1n+-#Alice@1>Room1");
+        _router.Route(connectionId: 1, "#2Ui1n+-#Alice@1>Room1");
 
-        var result = _router.Route(connectionId: 2, "2Ui1n+-#Bob@1>Room1");
+        var result = _router.Route(connectionId: 2, "#2Ui1n+-#Bob@1>Room1");
 
         // #->6 广播应排除 Bob 自己，发给 Alice (connId=1)
         var broadcast = result.Actions
@@ -126,8 +126,8 @@ public class MessageRouterTests
     [Fact]
     public void ChatMessage_BroadcastsToOthers()
     {
-        _router.Route(connectionId: 1, "2Ui1n+-#Alice@1>Room1");
-        _router.Route(connectionId: 2, "2Ui1n+-#Bob@1>Room1");
+        _router.Route(connectionId: 1, "#2Ui1n+-#Alice@1>Room1");
+        _router.Route(connectionId: 2, "#2Ui1n+-#Bob@1>Room1");
 
         var result = _router.Route(connectionId: 1, "Hello everyone!");
 
@@ -153,8 +153,8 @@ public class MessageRouterTests
     [Fact]
     public void PrivateMessage_TargetExists_RoutesDirectly()
     {
-        _router.Route(connectionId: 1, "2Ui1n+-#Alice@1>Room1");
-        _router.Route(connectionId: 2, "2Ui1n+-#Bob@1>Room1");
+        _router.Route(connectionId: 1, "#2Ui1n+-#Alice@1>Room1");
+        _router.Route(connectionId: 2, "#2Ui1n+-#Bob@1>Room1");
 
         // Alice 向 Bob 发私聊
         var result = _router.Route(connectionId: 1, "#->7Bob#->Hi Bob!");
@@ -170,7 +170,7 @@ public class MessageRouterTests
     [Fact]
     public void PrivateMessage_TargetNotFound_SendsUserLeave()
     {
-        _router.Route(connectionId: 1, "2Ui1n+-#Alice@1>Room1");
+        _router.Route(connectionId: 1, "#2Ui1n+-#Alice@1>Room1");
 
         // Alice 向不存在的用户发私聊
         var result = _router.Route(connectionId: 1, "#->7Nobody#->Hello?");
@@ -185,8 +185,8 @@ public class MessageRouterTests
     [Fact]
     public void PrivateMessage_FormattedCorrectly()
     {
-        _router.Route(connectionId: 1, "2Ui1n+-#Alice@1>Room1");
-        _router.Route(connectionId: 2, "2Ui1n+-#Tao2817@1>Room1");
+        _router.Route(connectionId: 1, "#2Ui1n+-#Alice@1>Room1");
+        _router.Route(connectionId: 2, "#2Ui1n+-#Tao2817@1>Room1");
 
         // 复刻旧版示例: #->7Tao2817#->Hello_World!
         var result = _router.Route(connectionId: 1, "#->7Tao2817#->Hello_World!");
@@ -204,8 +204,8 @@ public class MessageRouterTests
     [Fact]
     public void HandleDisconnect_LoggedInUser_BroadcastsLeave()
     {
-        _router.Route(connectionId: 1, "2Ui1n+-#Alice@1>Room1");
-        _router.Route(connectionId: 2, "2Ui1n+-#Bob@1>Room1");
+        _router.Route(connectionId: 1, "#2Ui1n+-#Alice@1>Room1");
+        _router.Route(connectionId: 2, "#2Ui1n+-#Bob@1>Room1");
 
         // Bob 断开连接
         var result = _router.HandleDisconnect(connectionId: 2);
@@ -228,7 +228,7 @@ public class MessageRouterTests
     [Fact]
     public void HandleDisconnect_LastUser_CleansUpRoom()
     {
-        _router.Route(connectionId: 1, "2Ui1n+-#Alice@1>Room1");
+        _router.Route(connectionId: 1, "#2Ui1n+-#Alice@1>Room1");
 
         _router.HandleDisconnect(connectionId: 1);
 
@@ -263,7 +263,7 @@ public class MessageRouterTests
     public void Login_DoesNotSendUserListWhenAlone()
     {
         // 第一个用户加入空聊天室 — 不应发送 #->5（没有其他人）
-        var result = _router.Route(connectionId: 1, "2Ui1n+-#Solo@1>EmptyRoom");
+        var result = _router.Route(connectionId: 1, "#2Ui1n+-#Solo@1>EmptyRoom");
 
         var userListAction = result.Actions
             .OfType<OutgoingAction.Send>()
@@ -274,8 +274,8 @@ public class MessageRouterTests
     [Fact]
     public void Login_AllCommandsUseProtocolConstants()
     {
-        _router.Route(connectionId: 1, "2Ui1n+-#Alice@1>Room1");
-        var result = _router.Route(connectionId: 2, "2Ui1n+-#Bob@1>Room1");
+        _router.Route(connectionId: 1, "#2Ui1n+-#Alice@1>Room1");
+        var result = _router.Route(connectionId: 2, "#2Ui1n+-#Bob@1>Room1");
 
         // 所有命令均应使用 #-> 前缀
         foreach (var action in result.Actions.OfType<OutgoingAction.Send>())

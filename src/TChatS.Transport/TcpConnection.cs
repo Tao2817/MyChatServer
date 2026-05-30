@@ -55,13 +55,20 @@ public sealed class TcpConnection : IConnection, IDisposable
     /// </summary>
     /// <param name="buffer">接收缓冲区</param>
     /// <param name="ct">取消令牌</param>
-    /// <returns>接收到的字节数。返回 0 表示对端已关闭连接。</returns>
+    /// <returns>接收到的字节数。返回 0 表示对端已关闭连接或 Socket 已释放。</returns>
     public async ValueTask<int> ReceiveAsync(Memory<byte> buffer, CancellationToken ct = default)
     {
         if (_disposed != 0)
-            throw new ObjectDisposedException(nameof(TcpConnection));
+            return 0;
 
-        return await _socket.ReceiveAsync(buffer, SocketFlags.None, ct).ConfigureAwait(false);
+        try
+        {
+            return await _socket.ReceiveAsync(buffer, SocketFlags.None, ct).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            return 0; // Socket 已被 Dispose (例如 Disconnect 关闭后)
+        }
     }
 
     /// <inheritdoc />

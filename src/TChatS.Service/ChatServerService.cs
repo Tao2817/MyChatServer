@@ -205,22 +205,29 @@ public sealed class ChatServerService : IAsyncDisposable
 
             if (bytesRead == 0)
             {
-                _logger.LogDebug("连接 {Id} 远端正常关闭", conn.Id);
-                break; // 客户端正常关闭
+                _logger.LogInformation("连接 {Id} ({Remote}) 远端已关闭连接",
+                    conn.Id, conn.RemoteEndPoint);
+                break; // 客户端正常关闭 / Socket 已释放
             }
 
             // 追加到累积缓冲区
             accumulated.AddRange(readBuffer.AsSpan(0, bytesRead));
 
             // 尝试解析完整消息
-            await TryParseAndRouteAsync(conn, accumulated, serverCt);
+            var ok = await TryParseAndRouteAsync(conn, accumulated, serverCt);
+            if (!ok)
+            {
+                conn.Disconnect();
+                break;
+            }
         }
     }
 
     /// <summary>
     /// 从累积缓冲区中解析所有完整消息并路由。
+    /// 返回 <c>false</c> 表示协议错误，调用方应断开连接。
     /// </summary>
-    private async Task TryParseAndRouteAsync(
+    private async Task<bool> TryParseAndRouteAsync(
         TcpConnection conn, List<byte> accumulated, CancellationToken ct)
     {
         var sequence = new ReadOnlySequence<byte>(accumulated.ToArray());
@@ -237,8 +244,7 @@ public sealed class ChatServerService : IAsyncDisposable
             catch (ProtocolException ex)
             {
                 _logger.LogWarning("协议解析错误: {Message}", ex.Message);
-                conn.Disconnect();
-                return;
+                return false; // 通知调用方断开连接
             }
 
             // 回填连接 ID
@@ -255,6 +261,8 @@ public sealed class ChatServerService : IAsyncDisposable
         accumulated.Clear();
         if (sequence.Length > 0)
             accumulated.AddRange(sequence.ToArray());
+
+        return true;
     }
 
     // ─── 执行输出动作 ───

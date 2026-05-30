@@ -17,9 +17,9 @@ public class AuthServiceTests
     // ─── ParseLogin ───
 
     [Theory]
-    [InlineData("2Ui1n+-#Tao@1234>Room1", "Tao", "1234", "Room1")]
-    [InlineData("2Ui1n+-#Alice@pass>Lobby", "Alice", "pass", "Lobby")]
-    [InlineData("2Ui1n+-#Test@!@#$>Chat-X", "Test", "!@#$", "Chat-X")]
+    [InlineData("#2Ui1n+-#Tao@1234>Room1", "Tao", "1234", "Room1")]
+    [InlineData("#2Ui1n+-#Alice@pass>Lobby", "Alice", "pass", "Lobby")]
+    [InlineData("#2Ui1n+-#Test@!@#$>Chat-X", "Test", "!@#$", "Chat-X")]
     public void ParseLogin_ValidFormat_ExtractsCorrectly(string raw, string user, string pwd, string chatId)
     {
         var info = AuthService.ParseLogin(raw);
@@ -33,10 +33,10 @@ public class AuthServiceTests
     [Theory]
     [InlineData("")]                             // 空字符串
     [InlineData("Hello")]                        // 无魔术字
-    [InlineData("2Ui1n+-#@>")]                   // 空字段
-    [InlineData("2Ui1n+-#User>Chat")]            // 缺少 @Password
-    [InlineData("2Ui1n+-#User@Pass")]            // 缺少 >ChatID
-    [InlineData("2Ui1n+-#@Pass>Chat")]            // 缺少 UserName
+    [InlineData("#2Ui1n+-#@>")]                   // 空字段
+    [InlineData("#2Ui1n+-#User>Chat")]            // 缺少 @Password
+    [InlineData("#2Ui1n+-#User@Pass")]            // 缺少 >ChatID
+    [InlineData("#2Ui1n+-#@Pass>Chat")]            // 缺少 UserName
     public void ParseLogin_InvalidFormat_ReturnsNull(string raw)
     {
         var info = AuthService.ParseLogin(raw);

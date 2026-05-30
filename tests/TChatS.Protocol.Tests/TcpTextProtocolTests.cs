@@ -84,11 +84,11 @@ public class TcpTextProtocolTests
     [Fact]
     public void TryParse_LoginMessage_ReturnsRawLogin()
     {
-        var buffer = CreateBuffer("2Ui1n+-#Tao2817@1234>Room1\n");
+        var buffer = CreateBuffer("#2Ui1n+-#Tao2817@1234>Room1\n");
         var result = _protocol.TryParse(ref buffer);
 
         Assert.NotNull(result);
-        Assert.Equal("2Ui1n+-#Tao2817@1234>Room1", result.Value.RawContent);
+        Assert.Equal("#2Ui1n+-#Tao2817@1234>Room1", result.Value.RawContent);
     }
 
     [Fact]
