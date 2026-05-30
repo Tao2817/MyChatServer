@@ -185,18 +185,23 @@ public sealed class ChatServerService : IAsyncDisposable
 
         while (true)
         {
-            // 每次读取设 30 秒心跳超时
-            using var timeoutCts = new CancellationTokenSource(
-                TimeSpan.FromSeconds(_heartbeatSeconds));
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
-                serverCt, timeoutCts.Token);
+            // 心跳超时: -1 表示禁用
+            var timeoutCts = _heartbeatSeconds >= 0
+                ? new CancellationTokenSource(TimeSpan.FromSeconds(_heartbeatSeconds))
+                : null;
+            using var _ = timeoutCts;
+            var linkedCts = timeoutCts != null
+                ? CancellationTokenSource.CreateLinkedTokenSource(serverCt, timeoutCts.Token)
+                : null;
+            using var __ = linkedCts;
+            var receiveCt = linkedCts?.Token ?? serverCt;
 
             int bytesRead;
             try
             {
-                bytesRead = await conn.ReceiveAsync(readBuffer, linkedCts.Token);
+                bytesRead = await conn.ReceiveAsync(readBuffer, receiveCt);
             }
-            catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
+            catch (OperationCanceledException) when (timeoutCts?.IsCancellationRequested == true)
             {
                 _logger.LogWarning("连接 {Id} ({Remote}) 心跳超时 ({Seconds}s)",
                     conn.Id, conn.RemoteEndPoint, _heartbeatSeconds);
@@ -347,7 +352,7 @@ public class ChatServerOptions
     /// <summary>监听端口，默认 10035（与旧版一致）</summary>
     public int Port { get; set; } = 10035;
 
-    /// <summary>心跳超时秒数，默认 30</summary>
+    /// <summary>心跳超时秒数，-1 表示禁用，默认 30</summary>
     public int HeartbeatSeconds { get; set; } = 30;
 
     /// <summary>
