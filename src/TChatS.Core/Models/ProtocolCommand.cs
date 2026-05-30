@@ -58,9 +58,19 @@ public static class ProtocolFormat
     public const char LoginUserSeparator = '@';
     public const char LoginChatSeparator = '>';
 
-    /// <summary>构建协议指令字符串</summary>
-    public static string Command(ProtocolCommand cmd) => $"{Prefix}{(byte)cmd}";
+    /// <summary>
+    /// 构建协议指令字符串。
+    /// 无参数: <c>"#-&gt;0"</c>；带参数: <c>"#-&gt;6Tao"</c>；多参数: <c>"#-&gt;5Alice#Bob#"</c>
+    /// </summary>
+    public static string Command(ProtocolCommand cmd, params string[] args)
+        => $"{Prefix}{(byte)cmd}{string.Concat(args)}";
 
-    /// <summary>构建带参数的用户加入/离开指令</summary>
-    public static string CommandWithArg(ProtocolCommand cmd, string arg) => $"{Prefix}{(byte)cmd}{arg}";
+    /// <summary>
+    /// 序列化 #-&gt;5 的参数部分。
+    /// 旧版格式: <c>Name1#Name2#Name3#</c> — 每用户名以 # 结尾 (含最后一个)。
+    /// 调用方需自行拼接命令头: <c>Command(UserList, SerializeUserList(names))</c>
+    /// 出处: ServerSocket.cpp:152-158
+    /// </summary>
+    public static string SerializeUserList(IEnumerable<string> userNames)
+        => string.Concat(userNames.Select(n => n + "#"));
 }

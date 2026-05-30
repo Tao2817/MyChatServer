@@ -1,4 +1,5 @@
 using TChatS.Core.Models;
+using TChatS.Protocol;
 using TChatS.Storage;
 using Xunit;
 
@@ -16,7 +17,7 @@ public class MessageRouterTests
         _repo = new InMemoryUserRepository();
         _auth = new AuthService(_repo);
         _chatRooms = new ChatRoomManager();
-        _router = new MessageRouter(_chatRooms, _auth);
+        _router = new MessageRouter(_chatRooms, _auth, new TcpTextProtocolFormatter());
     }
 
     // ─── 登录流程 ───
@@ -251,10 +252,10 @@ public class MessageRouterTests
     }
 
     [Fact]
-    public void ProtocolFormat_CommandWithArg_ProducesCorrectFormat()
+    public void ProtocolFormat_Command_ProducesCorrectFormat()
     {
-        Assert.Equal("#->6Tao", ProtocolFormat.CommandWithArg(ProtocolCommand.UserJoin, "Tao"));
-        Assert.Equal("#->8Alice", ProtocolFormat.CommandWithArg(ProtocolCommand.UserLeave, "Alice"));
+        Assert.Equal("#->6Tao", ProtocolFormat.Command(ProtocolCommand.UserJoin, "Tao"));
+        Assert.Equal("#->8Alice", ProtocolFormat.Command(ProtocolCommand.UserLeave, "Alice"));
     }
 
     // ─── 消息路由不产生无意义动作 ───

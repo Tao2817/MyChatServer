@@ -19,6 +19,7 @@ public sealed class ChatServerService : IAsyncDisposable
     private readonly ChatRoomManager _chatRooms;
     private readonly MessageRouter _router;
     private readonly IProtocolParser _protocol;
+    private readonly IProtocolFormatter _fmt;
     private readonly ILogger<ChatServerService> _logger;
 
     private readonly IPAddress _bindAddress;
@@ -35,6 +36,7 @@ public sealed class ChatServerService : IAsyncDisposable
         ChatRoomManager chatRooms,
         MessageRouter router,
         IProtocolParser protocol,
+        IProtocolFormatter fmt,
         ChatServerOptions options,
         ILogger<ChatServerService> logger)
     {
@@ -42,6 +44,7 @@ public sealed class ChatServerService : IAsyncDisposable
         _chatRooms = chatRooms ?? throw new ArgumentNullException(nameof(chatRooms));
         _router = router ?? throw new ArgumentNullException(nameof(router));
         _protocol = protocol ?? throw new ArgumentNullException(nameof(protocol));
+        _fmt = fmt ?? throw new ArgumentNullException(nameof(fmt));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         _bindAddress = IPAddress.Parse(options.BindAddress);
@@ -79,7 +82,7 @@ public sealed class ChatServerService : IAsyncDisposable
         _serverCts?.Cancel();
 
         // 广播 #->3 服务器关闭到所有客户端
-        await BroadcastGlobalAsync(ProtocolFormat.Command(ProtocolCommand.ServerShutdown));
+        await BroadcastGlobalAsync(_fmt.ServerShutdown());
 
         // 等待所有客户端任务完成（给一点时间发送 #->3）
         if (_clientTasks.Count > 0)
@@ -280,13 +283,13 @@ public sealed class ChatServerService : IAsyncDisposable
             {
                 case OutgoingAction.Send send:
                     await SendToConnectionAsync(send.ConnectionId, send.Content);
-                    await Task.Delay(1000);
+                    await Task.Delay(100);
                     break;
 
                 case OutgoingAction.BroadcastToChat broadcast:
                     await BroadcastToChatAsync(
                         broadcast.ChatId, broadcast.Content, broadcast.ExcludeConnectionId);
-                    await Task.Delay(1000);
+                    await Task.Delay(100);
                     break;
 
                 case OutgoingAction.Disconnect disconnect:

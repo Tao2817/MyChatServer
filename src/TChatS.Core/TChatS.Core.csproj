@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\TChatS.Storage\TChatS.Storage.csproj" />
+    <ProjectReference Include="..\TChatS.Protocol\TChatS.Protocol.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

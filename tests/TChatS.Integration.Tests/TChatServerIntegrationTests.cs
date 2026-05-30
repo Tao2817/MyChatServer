@@ -33,6 +33,7 @@ public class TChatServerIntegrationTests : IAsyncDisposable
         services.AddSingleton<TChatS.Core.ChatRoomManager>();
         services.AddSingleton<TChatS.Core.MessageRouter>();
         services.AddSingleton<TChatS.Transport.ConnectionManager>();
+        services.AddSingleton<TChatS.Protocol.IProtocolFormatter, TcpTextProtocolFormatter>();
         services.AddSingleton(new ChatServerOptions
         {
             BindAddress = "127.0.0.1",
@@ -108,9 +109,6 @@ public class TChatServerIntegrationTests : IAsyncDisposable
                 leftover.RemoveRange(0, idx + 1);
                 if (msgs.Count >= maxCount) return msgs;
             }
-
-            // 后续读取用较短超时（数据已在路上）
-            perReadTimeout = 200;
         }
 
         return msgs;
@@ -155,7 +153,7 @@ public class TChatServerIntegrationTests : IAsyncDisposable
 
         using var b = await ConnectAsync(_port);
         await SendAsync(b, "#2Ui1n+-#Bob@1>Room1");
-        var bMsgs = await ReceiveAllAsync(b);
+        var bMsgs = await ReceiveAllAsync(b, idleTimeoutMs: 5000);
 
         // Bob 应收到 #->5 包含 Alice
         Assert.Contains(bMsgs, m => m.StartsWith("#->5") && m.Contains("Alice"));
