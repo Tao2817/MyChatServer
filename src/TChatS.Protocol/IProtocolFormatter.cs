@@ -26,4 +26,13 @@ public interface IProtocolFormatter
 
     /// <summary>用户离开 #-&gt;8</summary>
     string UserLeave(string userName);
+
+    /// <summary>服务器纯文本消息，如欢迎语、提示等</summary>
+    string ServerMessage(string content);
+
+    /// <summary>客户端普通群聊消息，如 <c>&lt;Alice&gt;: hello</c></summary>
+    string ClientNormalMessage(string userName, string content);
+
+    /// <summary>客户端私聊消息，如 <c>Private Message From&lt;Alice&gt;: hi</c></summary>
+    string ClientPrivateMessage(string senderName, string content);
 }

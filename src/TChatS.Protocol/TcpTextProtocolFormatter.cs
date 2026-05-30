@@ -33,4 +33,17 @@ public sealed class TcpTextProtocolFormatter : IProtocolFormatter
 
     /// <inheritdoc />
     public string UserLeave(string userName) => Cmd(8, userName);
+
+    /// <inheritdoc />
+    /// <remarks>格式: <c>&lt;Server&gt;: 欢迎加入群聊#Room1#</c></remarks>
+    public string ServerMessage(string content) => $"<Server>: {content}";
+
+    /// <inheritdoc />
+    /// <remarks>格式: <c>&lt;UserName&gt;: hello</c></remarks>
+    public string ClientNormalMessage(string userName, string content) => $"<{userName}>: {content}";
+
+    /// <inheritdoc />
+    /// <remarks>格式: <c>Private Message From&lt;UserName&gt;: hi</c></remarks>
+    public string ClientPrivateMessage(string senderName, string content) =>
+        $"Private Message From<{senderName}>: {content}";
 }

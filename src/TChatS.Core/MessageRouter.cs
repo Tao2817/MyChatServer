@@ -49,7 +49,7 @@ public class MessageRouter
         if (loginInfo == null)
         {
             actions.Add(new OutgoingAction.Send(connectionId,
-                $"<Warning>: 非法登录，可能是网络问题，非法信息为\"{rawContent}\""));
+                _fmt.ServerMessage($"Warning: 非法登录，可能是网络问题，非法信息为\"{rawContent}\"")));
             actions.Add(new OutgoingAction.Disconnect(connectionId));
             return new RouteResult(actions);
         }
@@ -57,7 +57,7 @@ public class MessageRouter
         var nameError = AuthService.ValidateUserName(loginInfo.UserName);
         if (nameError != null)
         {
-            actions.Add(new OutgoingAction.Send(connectionId, $"<Server>: {nameError}"));
+            actions.Add(new OutgoingAction.Send(connectionId, _fmt.ServerMessage(nameError)));
             actions.Add(new OutgoingAction.Disconnect(connectionId));
             return new RouteResult(actions);
         }
@@ -79,14 +79,14 @@ public class MessageRouter
             // 新用户 → #->2 + 欢迎消息
             actions.Add(new OutgoingAction.Send(connectionId, _fmt.NewUser()));
             actions.Add(new OutgoingAction.Send(connectionId,
-                $"<Server>: 欢迎加入群聊#{loginInfo.ChatId}#"));
+                _fmt.ServerMessage($"欢迎加入群聊#{loginInfo.ChatId}#")));
         }
         else
         {
             // 老用户回归 → #->0 + 欢迎回来
             actions.Add(new OutgoingAction.Send(connectionId, _fmt.ReloginSuccess()));
             actions.Add(new OutgoingAction.Send(connectionId,
-                $"<Server>: <{loginInfo.UserName}>欢迎回来,您已进入#{loginInfo.ChatId}#群聊"));
+                _fmt.ServerMessage($"<{loginInfo.UserName}>欢迎回来,您已进入#{loginInfo.ChatId}#群聊")));
         }
 
         // 广播 #->6 给聊天室内其他用户
@@ -116,7 +116,8 @@ public class MessageRouter
         var actions = new List<OutgoingAction>
         {
             new OutgoingAction.BroadcastToChat(
-                chatRoom.ChatId, $"<{userName}>: {rawContent}", ExcludeConnectionId: connectionId)
+                chatRoom.ChatId, _fmt.ClientNormalMessage(userName, rawContent),
+                ExcludeConnectionId: connectionId)
         };
         return new RouteResult(actions);
     }
@@ -135,7 +136,8 @@ public class MessageRouter
             return new RouteResult(new List<OutgoingAction>
             {
                 new OutgoingAction.BroadcastToChat(
-                    chatRoom.ChatId, $"<{senderName}>: {rawContent}", ExcludeConnectionId: connectionId)
+                    chatRoom.ChatId, _fmt.ClientNormalMessage(senderName, rawContent),
+                    ExcludeConnectionId: connectionId)
             });
         }
 
@@ -149,7 +151,7 @@ public class MessageRouter
         {
             // 目标存在 → 转发私聊消息
             actions.Add(new OutgoingAction.Send(targetConnId.Value,
-                $"Private Message From<{senderName}>: {privateMessage}"));
+                _fmt.ClientPrivateMessage(senderName, privateMessage)));
         }
         else
         {
