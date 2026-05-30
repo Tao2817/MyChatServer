@@ -1,3 +1,13 @@
 <Solution>
-  <Project Path="TChatS.csproj" />
+  <Folder Name="/src/">
+    <Project Path="src/TChatS.Core/TChatS.Core.csproj" />
+    <Project Path="src/TChatS.Protocol/TChatS.Protocol.csproj" />
+    <Project Path="src/TChatS.Storage/TChatS.Storage.csproj" />
+    <Project Path="src/TChatS.Transport/TChatS.Transport.csproj" />
+    <Project Path="src/TChatS.Service/TChatS.Service.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/TChatS.Core.Tests/TChatS.Core.Tests.csproj" />
+    <Project Path="tests/TChatS.Protocol.Tests/TChatS.Protocol.Tests.csproj" />
+  </Folder>
 </Solution>
