@@ -1,10 +1,10 @@
 namespace TChatS.Protocol;
 
 /// <summary>
-/// 旧版 TCP 文本协议的 <see cref="IProtocolFormatter"/> 实现。
+/// 旧版 TCP 文本协议的 <see cref="IServiceProtocolFormatter"/> 实现。
 /// 所有指令格式: <c>#-&gt;N[args]</c>，与 TChatServer_old 完全兼容。
 /// </summary>
-public sealed class TcpTextProtocolFormatter : IProtocolFormatter
+public sealed class TextServiceProtocolFormatter : IServiceProtocolFormatter
 {
     private const string Prefix = "#->";
 

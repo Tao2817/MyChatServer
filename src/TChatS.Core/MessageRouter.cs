@@ -12,9 +12,9 @@ public class MessageRouter
 {
     private readonly ChatRoomManager _chatRooms;
     private readonly AuthService _auth;
-    private readonly IProtocolFormatter _fmt;
+    private readonly IServiceProtocolFormatter _fmt;
 
-    public MessageRouter(ChatRoomManager chatRooms, AuthService auth, IProtocolFormatter fmt)
+    public MessageRouter(ChatRoomManager chatRooms, AuthService auth, IServiceProtocolFormatter fmt)
     {
         _chatRooms = chatRooms ?? throw new ArgumentNullException(nameof(chatRooms));
         _auth = auth ?? throw new ArgumentNullException(nameof(auth));
@@ -155,7 +155,7 @@ public class MessageRouter
         }
         else
         {
-            // 目标不存在 → IProtocolFormatter 会生成 #->8{target}
+            // 目标不存在 → IServiceProtocolFormatter 会生成 #->8{target}
             actions.Add(new OutgoingAction.Send(connectionId,
                 _fmt.UserLeave(targetUserName)));
         }

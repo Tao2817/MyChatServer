@@ -17,7 +17,7 @@ public class MessageRouterTests
         _repo = new InMemoryUserRepository();
         _auth = new AuthService(_repo);
         _chatRooms = new ChatRoomManager();
-        _router = new MessageRouter(_chatRooms, _auth, new TcpTextProtocolFormatter());
+        _router = new MessageRouter(_chatRooms, _auth, new TextServiceProtocolFormatter());
     }
 
     // ─── 登录流程 ───

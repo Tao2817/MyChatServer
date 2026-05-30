@@ -4,7 +4,7 @@ namespace TChatS.Protocol;
 /// 业务协议格式化接口。将业务语义（登录成功、用户加入等）转换为协议层字符串。
 /// 不同实现对应不同的协议版本，方便后续切换。
 /// </summary>
-public interface IProtocolFormatter
+public interface IServiceProtocolFormatter
 {
     /// <summary>重新登录成功 #-&gt;0</summary>
     string ReloginSuccess();

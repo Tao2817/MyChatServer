@@ -19,7 +19,7 @@ public sealed class ChatServerService : IAsyncDisposable
     private readonly ChatRoomManager _chatRooms;
     private readonly MessageRouter _router;
     private readonly IProtocolParser _protocol;
-    private readonly IProtocolFormatter _fmt;
+    private readonly IServiceProtocolFormatter _fmt;
     private readonly ILogger<ChatServerService> _logger;
 
     private readonly IPAddress _bindAddress;
@@ -36,7 +36,7 @@ public sealed class ChatServerService : IAsyncDisposable
         ChatRoomManager chatRooms,
         MessageRouter router,
         IProtocolParser protocol,
-        IProtocolFormatter fmt,
+        IServiceProtocolFormatter fmt,
         ChatServerOptions options,
         ILogger<ChatServerService> logger)
     {

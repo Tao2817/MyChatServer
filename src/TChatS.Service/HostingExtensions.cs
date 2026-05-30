@@ -60,7 +60,7 @@ public static class HostingExtensions
         services.AddSingleton<ConnectionManager>();
 
         // 协议层 — 根据配置选择协议实现
-        services.AddSingleton<IProtocolFormatter, TcpTextProtocolFormatter>();
+        services.AddSingleton<IServiceProtocolFormatter, TextServiceProtocolFormatter>();
         services.AddSingleton<IProtocolParser>(sp =>
         {
             var options = sp.GetRequiredService<ChatServerOptions>();
