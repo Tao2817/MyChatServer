@@ -11,7 +11,7 @@ public class TcpTextProtocolLegacyTests
     [Fact]
     public void TryParse_CompleteMessage_ReturnsEntireBuffer()
     {
-        // 模拟客户端发送的登录消息 (UTF-8 窄字节)
+        // 模拟客户端发送的登录消息 (UTF-16 LE 宽字节)
         var buffer = CreateBuffer("2Ui1n+-#Tao2817@1234>Room1");
         var result = _protocol.TryParse(ref buffer);
 
@@ -66,14 +66,15 @@ public class TcpTextProtocolLegacyTests
     public void TryParse_AtMaxSize_Succeeds()
     {
         var protocol = new TcpTextProtocolLegacy { MaxMessageSize = 200 };
-        var content = new string('A', 200);
-        var bytes = Encoding.UTF8.GetBytes(content);
+        // UTF-16 LE: 100 字符 = 200 字节，恰好等于 MaxMessageSize
+        var content = new string('A', 100);
+        var bytes = Encoding.Unicode.GetBytes(content);
         var buffer = new ReadOnlySequence<byte>(bytes);
 
         var result = protocol.TryParse(ref buffer);
 
         Assert.NotNull(result);
-        Assert.Equal(200, result.Value.RawContent.Length);
+        Assert.Equal(100, result.Value.RawContent.Length);
     }
 
     [Fact]
@@ -141,15 +142,15 @@ public class TcpTextProtocolLegacyTests
         var original = "2Ui1n+-#User@Pass>Room1";
         var msg = new ProtocolMessage(original, ConnectionId: 0);
 
-        // Encode → TryParse 往返
+        // 客户端和服务端统一使用 UTF-16 LE
+        // Encode 和 TryParse 都使用 Encoding.Unicode
         var encoded = _protocol.Encode(msg);
+        var buffer = new ReadOnlySequence<byte>(encoded);
+        var parsed = _protocol.TryParse(ref buffer);
 
-        // 注意: Encode 用的是 SendEncoding (UTF-16 LE)，
-        // 但 TryParse 用 ReceiveEncoding (UTF-8)。
-        // 在实际场景中，客户端用窄字节发送，服务端用宽字节回复。
-        // 这里测试 Encode 本身的正确性。
-        var decoded = Encoding.Unicode.GetString(encoded.Span);
-        Assert.Equal(original, decoded);
+        Assert.NotNull(parsed);
+        Assert.Equal(original, parsed.Value.RawContent);
+        Assert.Equal(0, buffer.Length);
     }
 
     [Fact]
@@ -172,13 +173,13 @@ public class TcpTextProtocolLegacyTests
     [Fact]
     public void ReceiveEncoding_Utf8_HandlesChinese()
     {
-        // 测试如果客户端以 UTF-8 发送中文
+        // 测试如果客户端以 UTF-8 发送中文（非标准，覆盖 ReceiveEncoding 时使用）
         var protocol = new TcpTextProtocolLegacy
         {
             ReceiveEncoding = Encoding.UTF8
         };
 
-        var buffer = CreateBuffer("你好世界");
+        var buffer = CreateBuffer("你好世界", Encoding.UTF8);
         var result = protocol.TryParse(ref buffer);
 
         Assert.NotNull(result);
@@ -189,7 +190,7 @@ public class TcpTextProtocolLegacyTests
 
     private static ReadOnlySequence<byte> CreateBuffer(string text, Encoding? encoding = null)
     {
-        var enc = encoding ?? Encoding.UTF8;
+        var enc = encoding ?? Encoding.Unicode; // 旧版默认 UTF-16 LE
         var bytes = enc.GetBytes(text);
         return new ReadOnlySequence<byte>(bytes);
     }

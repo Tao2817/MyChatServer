@@ -8,10 +8,11 @@ namespace TChatS.Protocol;
 ///
 /// 与旧版 CAsyncSocket 行为一致:
 /// <list type="bullet">
-///   <item><b>接收 (C→S):</b> 无分帧 — 每次 Receive 收到的数据即为一条完整消息。
-///        旧版客户端发送窄字节 (ANSI/ASCII)，服务端用 <c>CString.Format("%s", char_buffer)</c> 转宽字符。</item>
-///   <item><b>发送 (S→C):</b> 无分帧 — 每条消息直接转为 UTF-16 LE 字节发送。
-///        旧版服务端用 <c>Send(msg, msg.GetLength() * 2)</c> 发送宽字符字节。</item>
+///   <item><b>收发编码:</b> 客户端和服务端均使用 <c>CString</c> (UTF-16 LE)，
+///        <c>Send(buf, GetLength()*2)</c> 发送原始宽字符字节。
+///        服务端 <c>Receive(char[200])</c> 后由 <c>CString::Format("%s", char_buf)</c>
+///        的 wchar_t*/char* 类型不匹配恰好将 UTF-16 LE 字节正确解释为宽字符串。</item>
+///   <item><b>分帧:</b> 无 — 每次 Receive 收到的数据即为一条完整消息。</item>
 ///   <item><b>最大长度:</b> 固定 200 字节，与旧版 <c>Receive(Rmessage, 200)</c> 一致。</item>
 /// </list>
 /// </summary>
@@ -34,9 +35,9 @@ public class TcpTextProtocolLegacy : IProtocolParser
 
     /// <summary>
     /// 接收 (客户端→服务端) 使用的编码。
-    /// 默认 UTF-8，兼容旧版客户端的窄字节发送 (ASCII 兼容)。
+    /// 默认 UTF-16 LE，与旧版客户端 <c>Send(CString, GetLength()*2)</c> 行为一致。
     /// </summary>
-    public Encoding ReceiveEncoding { get; init; } = Encoding.UTF8;
+    public Encoding ReceiveEncoding { get; init; } = Encoding.Unicode;
 
     /// <summary>
     /// 发送 (服务端→客户端) 使用的编码。

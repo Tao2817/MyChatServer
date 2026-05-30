@@ -8,6 +8,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/TChatS.Core.Tests/TChatS.Core.Tests.csproj" />
+    <Project Path="tests/TChatS.Integration.Tests/TChatS.Integration.Tests.csproj" />
     <Project Path="tests/TChatS.Protocol.Tests/TChatS.Protocol.Tests.csproj" />
   </Folder>
 </Solution>
