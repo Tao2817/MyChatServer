@@ -33,7 +33,7 @@ public class TChatServerIntegrationTests : IAsyncDisposable
         services.AddSingleton<TChatS.Core.ChatRoomManager>();
         services.AddSingleton<TChatS.Core.MessageRouter>();
         services.AddSingleton<TChatS.Transport.ConnectionManager>();
-        services.AddSingleton<TChatS.Protocol.IServiceProtocolFormatter, TextServiceProtocolFormatter>();
+        services.AddSingleton<TChatS.Protocol.IServiceProtocol, TextServiceProtocol>();
         services.AddSingleton(new ChatServerOptions
         {
             BindAddress = "127.0.0.1",
