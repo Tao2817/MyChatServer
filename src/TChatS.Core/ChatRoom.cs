@@ -100,6 +100,7 @@ public class ChatRoom
     /// </summary>
     public IReadOnlyList<ChatUser> GetUsers()
     {
-        return _users.Values.ToList();
+        // Select 枚举键值对而非 .Values，避免 ConcurrentDictionary 锁+快照开销
+        return _users.Select(kvp => kvp.Value).ToList();
     }
 }

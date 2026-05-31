@@ -5,6 +5,7 @@
     <Project Path="src/TChatS.Storage/TChatS.Storage.csproj" />
     <Project Path="src/TChatS.Transport/TChatS.Transport.csproj" />
     <Project Path="src/TChatS.Service/TChatS.Service.csproj" />
+    <Project Path="src/TChatS.StressTest/TChatS.StressTest.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/TChatS.Core.Tests/TChatS.Core.Tests.csproj" />

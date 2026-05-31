@@ -31,7 +31,8 @@ public class ChatRoomManager
     /// </summary>
     public ChatRoom? FindRoomByConnection(long connectionId)
     {
-        return _rooms.Values.FirstOrDefault(r => r.Contains(connectionId));
+        // 直接枚举键值对而非 .Values，避免 ConcurrentDictionary 锁+快照开销
+        return _rooms.FirstOrDefault(kvp => kvp.Value.Contains(connectionId)).Value;
     }
 
     /// <summary>
@@ -81,8 +82,9 @@ public class ChatRoomManager
     /// </summary>
     public IReadOnlyList<(long connectionId, string chatId)> GetAllConnections()
     {
-        return _rooms.Values
-            .SelectMany(r => r.GetUsers().Select(u => (u.ConnectionId, r.ChatId)))
+        // 直接枚举键值对而非 .Values，避免 ConcurrentDictionary 锁+快照开销
+        return _rooms
+            .SelectMany(kvp => kvp.Value.GetUsers().Select(u => (u.ConnectionId, kvp.Value.ChatId)))
             .ToList();
     }
 }
