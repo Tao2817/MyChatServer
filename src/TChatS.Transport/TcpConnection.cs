@@ -1,4 +1,5 @@
 using System.Net.Sockets;
+using Microsoft.Extensions.Logging;
 
 namespace TChatS.Transport;
 
@@ -9,12 +10,15 @@ public sealed class TcpConnection : IConnection, IDisposable
 {
     private readonly Socket _socket;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
+    private readonly ILogger<TcpConnection>? _logger;
     private int _disposed;
+    private int _disconnected;
 
-    public TcpConnection(long id, Socket socket)
+    public TcpConnection(long id, Socket socket, ILogger<TcpConnection>? logger = null)
     {
         Id = id;
         _socket = socket ?? throw new ArgumentNullException(nameof(socket));
+        _logger = logger;
         RemoteEndPoint = socket.RemoteEndPoint?.ToString() ?? "(unknown)";
     }
 
@@ -22,7 +26,11 @@ public sealed class TcpConnection : IConnection, IDisposable
     public long Id { get; }
 
     /// <inheritdoc />
-    public bool IsConnected => _disposed == 0 && _socket.Connected;
+    /// <remarks>
+    /// 不依赖 <see cref="Socket.Connected"/>（该属性只在最近一次 Send/Receive 后才反映真实状态，
+    /// 远端 RST 后可能仍为 true）。改用内部标记位，<see cref="Disconnect()"/> 后立即变为 false。
+    /// </remarks>
+    public bool IsConnected => _disposed == 0 && _disconnected == 0;
 
     /// <inheritdoc />
     public string RemoteEndPoint { get; }
@@ -35,18 +43,35 @@ public sealed class TcpConnection : IConnection, IDisposable
     /// <inheritdoc />
     public async Task SendAsync(ReadOnlyMemory<byte> data, CancellationToken ct = default)
     {
-        if (_disposed != 0)
-            throw new ObjectDisposedException(nameof(TcpConnection));
+        if (_disconnected != 0)
+            throw new InvalidOperationException("连接已被断开。");
 
-        // Socket.SendAsync 不是线程安全的，使用 SemaphoreSlim 串行化
-        await _sendLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await _sendLock.WaitAsync(ct).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException ex)
+        {
+            _logger?.LogDebug("SendAsync: 连接已被释放，无法获取发送锁 ({Id}): {Message}", Id, ex.Message);
+            throw new InvalidOperationException("连接已被释放。");
+        }
+
         try
         {
             await _socket.SendAsync(data, SocketFlags.None, ct).ConfigureAwait(false);
         }
+        catch (ObjectDisposedException ex)
+        {
+            _logger?.LogDebug("SendAsync: Socket 已被释放 ({Id}): {Message}", Id, ex.Message);
+            throw new InvalidOperationException("连接已被释放。");
+        }
         finally
         {
-            _sendLock.Release();
+            try { _sendLock.Release(); }
+            catch (ObjectDisposedException ex)
+            {
+                _logger?.LogDebug("SendAsync: 释放发送锁时连接已被释放 ({Id}): {Message}", Id, ex.Message);
+            }
         }
     }
 
@@ -55,36 +80,46 @@ public sealed class TcpConnection : IConnection, IDisposable
     /// </summary>
     /// <param name="buffer">接收缓冲区</param>
     /// <param name="ct">取消令牌</param>
-    /// <returns>接收到的字节数。返回 0 表示对端已关闭连接或 Socket 已释放。</returns>
+    /// <returns>接收到的字节数。返回 0 表示对端已关闭连接、连接已断开、或 Socket 已释放。</returns>
     public async ValueTask<int> ReceiveAsync(Memory<byte> buffer, CancellationToken ct = default)
     {
-        if (_disposed != 0)
+        if (_disposed != 0 || _disconnected != 0)
             return 0;
 
         try
         {
             return await _socket.ReceiveAsync(buffer, SocketFlags.None, ct).ConfigureAwait(false);
         }
-        catch (ObjectDisposedException)
+        catch (ObjectDisposedException ex)
         {
-            return 0; // Socket 已被 Dispose (例如 Disconnect 关闭后)
+            _logger?.LogDebug("ReceiveAsync: Socket 已被释放 ({Id}): {Message}", Id, ex.Message);
+            return 0;
+        }
+        catch (SocketException ex)
+        {
+            _logger?.LogDebug("ReceiveAsync: 连接异常断开 ({Id}): {Message}", Id, ex.Message);
+            return 0;
         }
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// 设置断开标记并 shutdown TCP 通道，但不释放 Socket 句柄——
+    /// 释放由 <see cref="Dispose()"/> 统一处理。
+    /// 幂等：重复调用不会重复操作。
+    /// </remarks>
     public void Disconnect()
     {
+        if (Interlocked.Exchange(ref _disconnected, 1) != 0)
+            return; // 已经断开
+
         try
         {
-            if (_socket.Connected)
-            {
-                _socket.Shutdown(SocketShutdown.Both);
-                _socket.Close();
-            }
+            _socket.Shutdown(SocketShutdown.Both);
         }
-        catch
+        catch (Exception ex)
         {
-            // 静默处理断开时的异常
+            _logger?.LogDebug("Disconnect: Shutdown 异常 ({Id}): {Message}", Id, ex.Message);
         }
     }
 
@@ -92,8 +127,17 @@ public sealed class TcpConnection : IConnection, IDisposable
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 0)
         {
-            try { _socket.Dispose(); } catch { /* 静默处理 */ }
-            try { _sendLock.Dispose(); } catch { /* 静默处理 */ }
+            Interlocked.Exchange(ref _disconnected, 1);
+            try { _socket.Dispose(); }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug("Dispose: Socket 释放异常 ({Id}): {Message}", Id, ex.Message);
+            }
+            try { _sendLock.Dispose(); }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug("Dispose: SemaphoreSlim 释放异常 ({Id}): {Message}", Id, ex.Message);
+            }
         }
     }
 }

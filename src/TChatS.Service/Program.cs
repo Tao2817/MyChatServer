@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Serilog;
 using TChatS.Service;
+using static TChatS.Service.LogHelper;
 
 // ─── 加载配置 ───
 var configuration = new ConfigurationBuilder()
@@ -54,7 +55,7 @@ using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>
 {
     e.Cancel = true;
-    logger.LogInformation("收到关闭信号，正在停止服务...");
+    Info(logger, "收到关闭信号，正在停止服务...");
     cts.Cancel();
 };
 
@@ -64,10 +65,9 @@ var server = provider.GetRequiredService<ChatServerService>();
 try
 {
     await server.StartAsync(cts.Token);
-    logger.LogInformation("TChatServer 已启动在 {Address}:{Port}",
-        serverOptions.BindAddress, serverOptions.Port);
-    logger.LogInformation("日志目录: {LogDir}", Path.GetFullPath(logDir));
-    logger.LogInformation("按 Ctrl+C 停止服务");
+    Info(logger, $"TChatServer 已启动在 {serverOptions.BindAddress}:{serverOptions.Port}");
+    Info(logger, $"日志目录: {Path.GetFullPath(logDir)}");
+    Info(logger, "按 Ctrl+C 停止服务");
 
     try
     {
@@ -83,6 +83,6 @@ try
 finally
 {
     await server.DisposeAsync();
-    logger.LogInformation("服务已完全关闭");
+    Info(logger, "服务已完全关闭");
     await Log.CloseAndFlushAsync();
 }

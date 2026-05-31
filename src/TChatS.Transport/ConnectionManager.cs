@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net.Sockets;
+using Microsoft.Extensions.Logging;
 
 namespace TChatS.Transport;
 
@@ -10,7 +11,13 @@ namespace TChatS.Transport;
 public class ConnectionManager
 {
     private readonly ConcurrentDictionary<long, TcpConnection> _connections = new();
+    private readonly ILoggerFactory? _loggerFactory;
     private long _nextId;
+
+    public ConnectionManager(ILoggerFactory? loggerFactory = null)
+    {
+        _loggerFactory = loggerFactory;
+    }
 
     /// <summary>
     /// 最大连接数，0 表示无限制。
@@ -25,7 +32,8 @@ public class ConnectionManager
     /// <summary>
     /// 获取所有活跃连接的快照（用于广播等场景）。
     /// </summary>
-    public IReadOnlyCollection<TcpConnection> ActiveConnections => _connections.Values.ToArray();
+    // 枚举键值对而非 .Values，避免 ConcurrentDictionary 锁+快照开销
+    public IReadOnlyCollection<TcpConnection> ActiveConnections => _connections.Select(kvp => kvp.Value).ToArray();
 
     /// <summary>
     /// 接受一个新的 Socket 连接并注册到管理器中。
@@ -43,7 +51,8 @@ public class ConnectionManager
         }
 
         var id = Interlocked.Increment(ref _nextId);
-        var connection = new TcpConnection(id, socket);
+        var logger = _loggerFactory?.CreateLogger<TcpConnection>();
+        var connection = new TcpConnection(id, socket, logger);
 
         if (!_connections.TryAdd(id, connection))
         {
@@ -81,13 +90,26 @@ public class ConnectionManager
     }
 
     /// <summary>
-    /// 获取当前所有活跃连接的 Socket 列表。
+    /// 获取当前所有活跃连接（IsConnected == true）。
     /// 用于连接存活检查等场景。
     /// </summary>
     public IReadOnlyList<TcpConnection> GetActiveConnections()
     {
-        return _connections.Values
-            .Where(c => c.IsConnected)
+        // 枚举键值对而非 .Values，避免 ConcurrentDictionary 锁+快照开销
+        return _connections
+            .Where(kvp => kvp.Value.IsConnected)
+            .Select(kvp => kvp.Value)
             .ToList();
     }
+
+    /// <summary>
+    /// 获取内部所有连接（包括已断开但尚未移除的），用于调试/监控。
+    /// </summary>
+    public IReadOnlyList<TcpConnection> GetAllConnections()
+    {
+        return _connections
+            .Select(kvp => kvp.Value)
+            .ToList();
+    }
+
 }

@@ -6,6 +6,7 @@ using TChatS.Core;
 using TChatS.Core.Models;
 using TChatS.Protocol;
 using TChatS.Transport;
+using static TChatS.Service.LogHelper;
 
 namespace TChatS.Service;
 
@@ -61,7 +62,7 @@ public sealed class ChatServerService : IAsyncDisposable
         _listener = new TcpListener(_bindAddress, _port);
         _listener.Start();
 
-        _logger.LogInformation("TChatServer 已启动 - {Address}:{Port}", _bindAddress, _port);
+        Info(_logger, $"TChatServer 已启动 - {_bindAddress}:{_port}");
 
         // 接受连接循环
         _ = AcceptLoopAsync(_serverCts.Token);
@@ -75,7 +76,7 @@ public sealed class ChatServerService : IAsyncDisposable
         if (Interlocked.Exchange(ref _stopped, 1) != 0)
             return; // 已停止
 
-        _logger.LogInformation("正在关闭服务...");
+        Info(_logger, "正在关闭服务...");
 
         // 停止接受新连接
         _listener?.Stop();
@@ -93,10 +94,10 @@ public sealed class ChatServerService : IAsyncDisposable
         // 强制关闭所有连接
         foreach (var conn in _connections.GetActiveConnections())
         {
-            try { conn.Disconnect(); } catch { /* 静默 */ }
+            try { conn.Disconnect(); } catch (Exception ex) { Warn(_logger, ex, "StopAsync: 强制断开连接异常"); }
         }
 
-        _logger.LogInformation("TChatServer 已停止");
+        Info(_logger, "TChatServer 已停止");
     }
 
     // ─── Accept 循环 ───
@@ -117,8 +118,7 @@ public sealed class ChatServerService : IAsyncDisposable
                     break;
                 }
 
-                _logger.LogInformation("<Listen>: 接收客户的一个连接请求 ({Remote})",
-                    socket.RemoteEndPoint?.ToString() ?? "unknown");
+                Info(_logger, $"<Listen>: 接收客户的一个连接请求 ({socket.RemoteEndPoint?.ToString() ?? "unknown"})");
 
                 // 注册到连接管理器
                 TcpConnection conn;
@@ -128,7 +128,7 @@ public sealed class ChatServerService : IAsyncDisposable
                 }
                 catch (InvalidOperationException ex)
                 {
-                    _logger.LogWarning(ex.Message);
+                    Warn(_logger, ex, $"Accept: {ex.Message}");
                     continue;
                 }
 
@@ -137,13 +137,13 @@ public sealed class ChatServerService : IAsyncDisposable
                 _clientTasks.Add(task);
             }
         }
-        catch (ObjectDisposedException)
+        catch (ObjectDisposedException ex)
         {
-            // listener 已释放，正常退出
+            Debug(_logger, $"AcceptLoopAsync: listener 已释放，正常退出 ({ex.Message})");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Accept 循环异常");
+            Error(_logger, ex, "Accept 循环异常");
         }
     }
 
@@ -157,25 +157,33 @@ public sealed class ChatServerService : IAsyncDisposable
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning("连接 {Id} ({Remote}): {Message}",
-                conn.Id, conn.RemoteEndPoint, ex.Message);
+            Warn(_logger, ex, $"HandleClientAsync: 异常, 连接 {conn.Id} ({conn.RemoteEndPoint}): {ex.Message}");
         }
         finally
         {
-            // 处理用户离开
+            // 1. 立即从连接池移除，确保无论后续通知是否成功，连接都不会泄漏
+            _connections.RemoveConnection(conn.Id);
+            var con_left = _connections.ActiveCount;
+            Info(_logger, $"_connections.RemoveConnection, 连接移除 {conn.Id} ({conn.RemoteEndPoint}) {con_left}");
+            if (con_left < 20)
+            {
+                var remaining = _connections.GetAllConnections();
+                Info(_logger, $"剩余连接数 {con_left}，详情: {string.Join(", ", remaining.Select(c => $"[{c.Id}] {c.RemoteEndPoint}"))}");
+            }
+
+            // 2. 处理用户离开（best-effort，失败不影响连接清理）
             try
             {
                 var leaveResult = _router.HandleDisconnect(conn.Id);
-                if (leaveResult.Actions.Count > 0)
-                    await ExecuteActionsAsync(leaveResult);
+                // if (leaveResult.Actions.Count > 0)
+                //     await ExecuteActionsAsync(leaveResult);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "处理离开事件异常");
+                Warn(_logger, ex, "处理离开事件异常");
             }
 
-            _connections.RemoveConnection(conn.Id);
-            _logger.LogInformation("连接 {Id} ({Remote}) 已断开", conn.Id, conn.RemoteEndPoint);
+            Info(_logger, $"连接 {conn.Id} ({conn.RemoteEndPoint}) 已断开");
         }
     }
 
@@ -206,15 +214,13 @@ public sealed class ChatServerService : IAsyncDisposable
             }
             catch (OperationCanceledException) when (timeoutCts?.IsCancellationRequested == true)
             {
-                _logger.LogWarning("连接 {Id} ({Remote}) 心跳超时 ({Seconds}s)",
-                    conn.Id, conn.RemoteEndPoint, _heartbeatSeconds);
+                Warn(_logger, $"连接 {conn.Id} ({conn.RemoteEndPoint}) 心跳超时 ({_heartbeatSeconds}s)");
                 break;
             }
 
             if (bytesRead == 0)
             {
-                _logger.LogInformation("连接 {Id} ({Remote}) 远端已关闭连接",
-                    conn.Id, conn.RemoteEndPoint);
+                Info(_logger, $"连接 {conn.Id} ({conn.RemoteEndPoint}) 远端已关闭连接");
                 break; // 客户端正常关闭 / Socket 已释放
             }
 
@@ -251,14 +257,14 @@ public sealed class ChatServerService : IAsyncDisposable
             }
             catch (ProtocolException ex)
             {
-                _logger.LogWarning("协议解析错误: {Message}", ex.Message);
+                Warn(_logger, ex, $"协议解析错误: {ex.Message}");
                 return false; // 通知调用方断开连接
             }
 
             // 回填连接 ID
             msg = msg with { ConnectionId = conn.Id };
 
-            _logger.LogDebug("收到 [{Id}]: {Content}", conn.Id, msg.RawContent);
+            Debug(_logger, $"收到 [{conn.Id}]: {msg.RawContent}");
 
             // 路由消息
             RouteResult result;
@@ -268,7 +274,7 @@ public sealed class ChatServerService : IAsyncDisposable
             }
             catch (ProtocolException ex)
             {
-                _logger.LogWarning("业务协议错误: {Message}", ex.Message);
+                Warn(_logger, ex, $"业务协议错误: {ex.Message}");
                 return false; // 通知调用方断开此连接
             }
             await ExecuteActionsAsync(result);
@@ -308,20 +314,30 @@ public sealed class ChatServerService : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// 向指定连接发送消息。发送失败时会关闭 socket 并从聊天室移除，
+    /// 避免后续广播继续尝试向已失效的连接发送。
+    /// </summary>
     private async Task SendToConnectionAsync(long connectionId, string content)
     {
         var conn = _connections.GetConnection(connectionId);
         if (conn == null || !conn.IsConnected)
             return;
-
+        if (_chatRooms.FindRoomByConnection(connectionId) == null)
+            return;
+        var protocolMmsg = new ProtocolMessage(content, connectionId);
         var bytes = _protocol.Encode(new ProtocolMessage(content, connectionId));
         try
         {
-            await conn.SendAsync(bytes);
+            // 设置发送超时，避免在已损坏的 socket 上无限等待 TCP 重传（默认可达数分钟）
+            using var sendCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await conn.SendAsync(bytes, sendCts.Token);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning("发送到 {Id} 失败: {Message}", connectionId, ex.Message);
+            Warn(_logger, $"发送到 {connectionId} ({conn.RemoteEndPoint}) 失败: {ex.Message}，主动断开该连接, {protocolMmsg}");
+            _chatRooms.LeaveRoom(connectionId);
+            conn.Disconnect();
         }
     }
 
