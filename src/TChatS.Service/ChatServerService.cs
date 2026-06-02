@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using Microsoft.Extensions.Logging;
@@ -29,8 +30,15 @@ public sealed class ChatServerService : IAsyncDisposable
 
     private TcpListener? _listener;
     private CancellationTokenSource? _serverCts;
-    private readonly List<Task> _clientTasks = [];
+    private readonly ConcurrentDictionary<long, Task> _clientTasks = new();
+    private long _nextClientTaskId;
     private int _stopped;
+
+    /// <summary>
+    /// StopAsync 等待客户端任务收尾的最长时间。
+    /// 必须 ≥ TcpConnection 的 writer 发送超时，否则 socket I/O 还没超时就被强制关。
+    /// </summary>
+    private static readonly TimeSpan StopGraceTimeout = TimeSpan.FromSeconds(7);
 
     public ChatServerService(
         ConnectionManager connections,
@@ -82,13 +90,15 @@ public sealed class ChatServerService : IAsyncDisposable
         _listener?.Stop();
         _serverCts?.Cancel();
 
-        // 广播 #->3 服务器关闭到所有客户端
-        await BroadcastGlobalAsync(_fmt.ServerShutdown());
+        // 广播 #->3 服务器关闭到所有客户端（仅入队，立即返回）
+        BroadcastGlobal(_fmt.ServerShutdown());
 
-        // 等待所有客户端任务完成（给一点时间发送 #->3）
-        if (_clientTasks.Count > 0)
+        // 等待所有客户端任务收尾。超时必须 ≥ writer 的 send 超时，
+        // 否则 socket I/O 还没机会超时就被强制关，看起来像连接残留。
+        if (!_clientTasks.IsEmpty)
         {
-            await Task.WhenAny(Task.WhenAll(_clientTasks), Task.Delay(3000));
+            var pending = _clientTasks.Values.ToArray();
+            await Task.WhenAny(Task.WhenAll(pending), Task.Delay(StopGraceTimeout));
         }
 
         // 强制关闭所有连接
@@ -132,9 +142,15 @@ public sealed class ChatServerService : IAsyncDisposable
                     continue;
                 }
 
-                // 启动独立的消息处理任务
+                // 启动独立的消息处理任务，注册到字典并在完成时自移除
+                var clientTaskId = Interlocked.Increment(ref _nextClientTaskId);
                 var task = HandleClientAsync(conn, ct);
-                _clientTasks.Add(task);
+                _clientTasks.TryAdd(clientTaskId, task);
+                _ = task.ContinueWith(
+                    _ => _clientTasks.TryRemove(clientTaskId, out Task? _),
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
             }
         }
         catch (ObjectDisposedException ex)
@@ -277,7 +293,7 @@ public sealed class ChatServerService : IAsyncDisposable
                 Warn(_logger, ex, $"业务协议错误: {ex.Message}");
                 return false; // 通知调用方断开此连接
             }
-            await ExecuteActionsAsync(result);
+            ExecuteActions(result);
         }
 
         // 重建未消费的数据
@@ -289,19 +305,23 @@ public sealed class ChatServerService : IAsyncDisposable
     }
 
     // ─── 执行输出动作 ───
+    //
+    // 现在所有 send/broadcast 都只负责把字节入队到 TcpConnection 的出站 Channel，
+    // 实际 socket I/O 由各连接的 writer 任务异步完成。因此这里全部是同步快速操作，
+    // sender 的 ReadLoop 不再被慢/卡住的目标连接拖住。
 
-    private async Task ExecuteActionsAsync(RouteResult result)
+    private void ExecuteActions(RouteResult result)
     {
         foreach (var action in result.Actions)
         {
             switch (action)
             {
                 case OutgoingAction.Send send:
-                    await SendToConnectionAsync(send.ConnectionId, send.Content);
+                    SendToConnection(send.ConnectionId, send.Content);
                     break;
 
                 case OutgoingAction.BroadcastToChat broadcast:
-                    await BroadcastToChatAsync(
+                    BroadcastToChat(
                         broadcast.ChatId, broadcast.Content, broadcast.ExcludeConnectionId);
                     break;
 
@@ -315,48 +335,43 @@ public sealed class ChatServerService : IAsyncDisposable
     }
 
     /// <summary>
-    /// 向指定连接发送消息。发送失败时会关闭 socket 并从聊天室移除，
-    /// 避免后续广播继续尝试向已失效的连接发送。
+    /// 向指定连接入队一条消息。入队失败时主动断开该连接，由其 HandleClientAsync 的
+    /// finally 统一清理（移除 _connections + LeaveRoom）。
     /// </summary>
-    private async Task SendToConnectionAsync(long connectionId, string content)
+    private void SendToConnection(long connectionId, string content)
     {
         var conn = _connections.GetConnection(connectionId);
         if (conn == null || !conn.IsConnected)
             return;
         if (_chatRooms.FindRoomByConnection(connectionId) == null)
             return;
-        var protocolMmsg = new ProtocolMessage(content, connectionId);
+
         var bytes = _protocol.Encode(new ProtocolMessage(content, connectionId));
         try
         {
-            // 设置发送超时，避免在已损坏的 socket 上无限等待 TCP 重传（默认可达数分钟）
-            using var sendCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            await conn.SendAsync(bytes, sendCts.Token);
+            conn.SendAsync(bytes); // 仅入队，立即返回；失败时同步抛 InvalidOperationException
         }
         catch (Exception ex)
         {
-            Warn(_logger, $"发送到 {connectionId} ({conn.RemoteEndPoint}) 失败: {ex.Message}，主动断开该连接, {protocolMmsg}");
+            Warn(_logger, $"入队到 {connectionId} ({conn.RemoteEndPoint}) 失败: {ex.Message}，主动断开");
             _chatRooms.LeaveRoom(connectionId);
             conn.Disconnect();
         }
     }
 
-    private async Task BroadcastToChatAsync(string chatId, string content, long excludeConnectionId)
+    private void BroadcastToChat(string chatId, string content, long excludeConnectionId)
     {
         var room = _chatRooms.FindRoom(chatId);
         if (room == null) return;
 
-        var targetIds = room.GetOtherConnectionIds(excludeConnectionId);
-        var tasks = targetIds.Select(id => SendToConnectionAsync(id, content));
-        await Task.WhenAll(tasks);
+        foreach (var id in room.GetOtherConnectionIds(excludeConnectionId))
+            SendToConnection(id, content);
     }
 
-    private async Task BroadcastGlobalAsync(string content)
+    private void BroadcastGlobal(string content)
     {
-        var allConns = _chatRooms.GetAllConnections();
-        var tasks = allConns
-            .Select(c => SendToConnectionAsync(c.connectionId, content));
-        await Task.WhenAll(tasks);
+        foreach (var (connectionId, _) in _chatRooms.GetAllConnections())
+            SendToConnection(connectionId, content);
     }
 
     // ─── 清理 ───

@@ -11,6 +11,13 @@ public class ChatRoomManager
     private readonly ConcurrentDictionary<string, ChatRoom> _rooms = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// 反向索引：connectionId → 所在 ChatRoom。
+    /// 把 FindRoomByConnection 从 O(rooms × users) 降到 O(1)，
+    /// 1k+ 连接 broadcast 时这个查找就在热路径上。
+    /// </summary>
+    private readonly ConcurrentDictionary<long, ChatRoom> _connectionIndex = new();
+
+    /// <summary>
     /// 获取或创建聊天室。
     /// </summary>
     public ChatRoom GetOrCreate(string chatId)
@@ -27,12 +34,11 @@ public class ChatRoomManager
     }
 
     /// <summary>
-    /// 按连接 ID 查找其所在的聊天室。
+    /// 按连接 ID 查找其所在的聊天室。O(1) 反向索引查找。
     /// </summary>
     public ChatRoom? FindRoomByConnection(long connectionId)
     {
-        // 直接枚举键值对而非 .Values，避免 ConcurrentDictionary 锁+快照开销
-        return _rooms.FirstOrDefault(kvp => kvp.Value.Contains(connectionId)).Value;
+        return _connectionIndex.TryGetValue(connectionId, out var room) ? room : null;
     }
 
     /// <summary>
@@ -42,7 +48,11 @@ public class ChatRoomManager
     public bool JoinRoom(string chatId, string userName, long connectionId)
     {
         var room = GetOrCreate(chatId);
-        return room.Join(userName, connectionId);
+        if (!room.Join(userName, connectionId))
+            return false;
+
+        _connectionIndex[connectionId] = room;
+        return true;
     }
 
     /// <summary>
@@ -51,8 +61,8 @@ public class ChatRoomManager
     /// <returns>(离开的用户名, 所在 ChatId)，未找到返回 (null, null)</returns>
     public (string? userName, string? chatId) LeaveRoom(long connectionId)
     {
-        var room = FindRoomByConnection(connectionId);
-        if (room == null) return (null, null);
+        if (!_connectionIndex.TryRemove(connectionId, out var room))
+            return (null, null);
 
         var userName = room.Leave(connectionId);
 
