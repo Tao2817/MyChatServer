@@ -335,10 +335,20 @@ public sealed class ChatServerService : IAsyncDisposable
     }
 
     /// <summary>
-    /// 向指定连接入队一条消息。入队失败时主动断开该连接，由其 HandleClientAsync 的
-    /// finally 统一清理（移除 _connections + LeaveRoom）。
+    /// 向单个目标入队一条消息（先编码再分发）。仅用于 1:1 的 Send 动作；
+    /// 广播路径请用 <see cref="EnqueueBytes"/> 直接复用同一份 bytes。
     /// </summary>
     private void SendToConnection(long connectionId, string content)
+    {
+        var bytes = _protocol.Encode(new ProtocolMessage(content, ConnectionId: 0));
+        EnqueueBytes(connectionId, bytes);
+    }
+
+    /// <summary>
+    /// 把已编码好的字节入队给指定连接。入队失败 → 主动断开，由 HandleClientAsync 的
+    /// finally 统一清理（移除 _connections + LeaveRoom）。
+    /// </summary>
+    private void EnqueueBytes(long connectionId, ReadOnlyMemory<byte> bytes)
     {
         var conn = _connections.GetConnection(connectionId);
         if (conn == null || !conn.IsConnected)
@@ -346,7 +356,6 @@ public sealed class ChatServerService : IAsyncDisposable
         if (_chatRooms.FindRoomByConnection(connectionId) == null)
             return;
 
-        var bytes = _protocol.Encode(new ProtocolMessage(content, connectionId));
         try
         {
             conn.SendAsync(bytes); // 仅入队，立即返回；失败时同步抛 InvalidOperationException
@@ -364,14 +373,17 @@ public sealed class ChatServerService : IAsyncDisposable
         var room = _chatRooms.FindRoom(chatId);
         if (room == null) return;
 
+        // 编码一次，所有目标共享同一份字节，避免 N 倍重复 Encode + GC 分配
+        var bytes = _protocol.Encode(new ProtocolMessage(content, ConnectionId: 0));
         foreach (var id in room.GetOtherConnectionIds(excludeConnectionId))
-            SendToConnection(id, content);
+            EnqueueBytes(id, bytes);
     }
 
     private void BroadcastGlobal(string content)
     {
+        var bytes = _protocol.Encode(new ProtocolMessage(content, ConnectionId: 0));
         foreach (var (connectionId, _) in _chatRooms.GetAllConnections())
-            SendToConnection(connectionId, content);
+            EnqueueBytes(connectionId, bytes);
     }
 
     // ─── 清理 ───

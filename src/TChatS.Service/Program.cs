@@ -28,11 +28,14 @@ Log.Logger = new LoggerConfiguration()
     .Enrich.With<StackTraceEnricher>()
     .WriteTo.Console(
         outputTemplate: "{Timestamp:HH:mm:ss} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
-    .WriteTo.File(
+    // 文件 sink 走异步队列：日志写盘从主线程剥离，压测高吞吐时不再被磁盘 IO 串行化。
+    // bufferSize=10000：超过则丢弃最旧（blockWhenFull 默认 false），避免日志反向拖慢业务。
+    .WriteTo.Async(a => a.File(
         path: logPath,
         rollingInterval: RollingInterval.Day,
         retainedFileCountLimit: 30,
-        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {Message:lj}{NewLine}{Exception}{StackTrace}")
+        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] {Message:lj}{NewLine}{Exception}{StackTrace}"),
+        bufferSize: 10000)
     .CreateLogger();
 
 // ─── DI 容器 ───
